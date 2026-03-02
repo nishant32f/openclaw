@@ -49,6 +49,9 @@
 - `fly ssh console -C` does not support `&&` or shell redirection. Use `sh -c '...'` or pipe via `echo '...' | fly ssh console -C "tee /path"`.
 - Config file written via SSH is owned by `root`; run `fly ssh console -C "chown node:node /data/openclaw.json"` so the gateway (runs as `node` user) can read it.
 - Never use `dangerouslyAllowHostHeaderOriginFallback` on internet-facing deployments (CORS bypass risk).
+- App name: `pawalker-openclaw`. Local config: `openclaw.json` (repo root). Local secrets: `.env` (gitignored).
+- Push config to Fly: `fly ssh console -a pawalker-openclaw -C "sh -c 'cat > /data/openclaw.json'" < openclaw.json && fly ssh console -a pawalker-openclaw -C "chown node:node /data/openclaw.json"`
+- Sync secrets to Fly from `.env`: `fly secrets import -a pawalker-openclaw < .env`
 
 ## exe.dev VM ops (general)
 

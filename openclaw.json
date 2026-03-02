@@ -1,0 +1,41 @@
+{
+  "env": {
+    "shellEnv": {
+      "enabled": true
+    }
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto",
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openrouter/deepseek/deepseek-chat",
+        "fallbacks": [
+          "openrouter/moonshotai/kimi-k2.5",
+          "openrouter/google/gemini-2.0-flash-exp:free"
+        ]
+      }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": ["834301102"],
+      "groups": { "*": { "requireMention": true } }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "controlUi": {
+      "allowedOrigins": [
+        "https://pawalker-openclaw.fly.dev"
+      ]
+    }
+  }
+}

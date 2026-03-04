@@ -16,7 +16,7 @@ PACKAGES=(
 echo "Installing packages on $APP..."
 for pkg in "${PACKAGES[@]}"; do
   echo "  -> $pkg"
-  fly ssh console -a "$APP" -C "sh -c 'sudo npm i -g $pkg'"
+  fly ssh console -a "$APP" -C "sh -c 'npm i -g $pkg'"
 done
 
 echo "Pushing config..."

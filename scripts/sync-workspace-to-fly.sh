@@ -37,8 +37,8 @@ echo "$FILE_LIST" | sed 's|^\./|  → |'
 # Replaces N individual SSH calls with one.
 echo
 echo "Pushing..."
-# --no-mac-metadata suppresses macOS extended attribute warnings on Linux remote
-echo "$FILE_LIST" | tar -cf - -C "$LOCAL_DIR" --no-mac-metadata -T - 2>/dev/null \
+# COPYFILE_DISABLE=1 prevents macOS ._* resource fork files in the tar archive
+echo "$FILE_LIST" | COPYFILE_DISABLE=1 tar -cf - -C "$LOCAL_DIR" -T - 2>/dev/null \
   | fly ssh console -a "$APP" -C "sh -c 'mkdir -p $REMOTE_DIR && tar -xf - -C $REMOTE_DIR 2>/dev/null && chown -R node:node $REMOTE_DIR'"
 
 echo "Done! Workspace is on persistent volume — survives deploys."

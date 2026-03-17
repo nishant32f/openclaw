@@ -1,3 +1,9 @@
+---
+name: foodlog
+description: "Track meals, calories, and nutrition via conversational food logging. Use when: user mentions eating, food, meals, snacks, or asks about calorie counts. Stores daily logs and a growing food calorie database in the workspace."
+metadata: { "openclaw": { "emoji": "🍽️" } }
+---
+
 # Food Log Skill
 
 Track meals, calories, and nutrition via conversational food logging.

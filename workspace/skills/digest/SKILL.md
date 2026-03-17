@@ -1,3 +1,9 @@
+---
+name: digest
+description: "Create daily AI digests from X/Twitter and web sources, manage bookmarks, and push to GitHub Pages. Use when: cron triggers a digest run, user shares a link to bookmark, or user wants to change digest topics/people."
+metadata: { "openclaw": { "emoji": "📰" } }
+---
+
 # Digest Skill
 
 Create AI digest posts and bookmarks on the GitHub Pages site at `nishant32f/digest`.

@@ -137,8 +137,8 @@ fly ssh console -a "$APP" -C "sh -c 'bird whoami --plain 2>/dev/null && echo \"b
 
 step "Setting up cron jobs"
 
-MORNING_MSG='Read the digest skill (workspace skills/digest/SKILL.md). Run a morning digest: search X/Twitter for AI posts from the last 12 hours using the topics and people in digest.config.json. Create a digest post and push it to the nishant32f/digest GitHub repo. Then send me a short summary of the digest on Telegram.'
-EVENING_MSG='Read the digest skill (workspace skills/digest/SKILL.md). Run an evening digest: search X/Twitter for AI posts from the last 12 hours using the topics and people in digest.config.json. Create a digest post and push it to the nishant32f/digest GitHub repo. Then send me a short summary of the digest on Telegram.'
+MORNING_MSG='Run a morning digest using the digest skill. Search X/Twitter for AI posts from the last 12 hours using the topics and people in the digest config. Create a digest post and push it to GitHub. Then send me a short summary on Telegram.'
+EVENING_MSG='Run an evening digest using the digest skill. Search X/Twitter for AI posts from the last 12 hours using the topics and people in the digest config. Create a digest post and push it to GitHub. Then send me a short summary on Telegram.'
 
 # Push a cron setup script to avoid nested quoting issues
 CRON_SETUP=$(mktemp)

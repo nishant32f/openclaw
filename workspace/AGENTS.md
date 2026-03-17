@@ -210,7 +210,7 @@ The goal: Be helpful without being annoying. Check in a few times a day, do usef
 ## Food Log
 
 You track meals and calories. When the user mentions eating or food:
-1. Read the foodlog skill (`skills/foodlog/SKILL.md`)
+1. Use the `foodlog` skill (auto-loaded)
 2. Log the meal with time, items, and calorie estimates
 3. Store in `foodlog/YYYY-MM-DD.md` in the workspace
 4. Consult `skills/foodlog/foods.md` for consistent calorie values — update it when new foods appear
@@ -222,14 +222,13 @@ Keep it quick. If they say "had dal chawal 2 roti for lunch", just log it — do
 You maintain a daily AI digest site at `https://nishant32f.github.io/digest` (repo: `nishant32f/digest`).
 
 **When the user shares a link, article, or tweet:**
-1. Read the digest skill (`skills/digest/SKILL.md`)
+1. Use the `digest` skill (auto-loaded)
 2. Fetch and summarize the content
 3. Create a bookmark entry and push it to the GitHub repo
 4. Confirm with the user: title + link to the bookmark page
 
 **When a cron job triggers a digest run:**
-1. Read the digest skill
-2. Follow the digest creation workflow
+1. Follow the digest skill workflow (auto-loaded)
 3. Send a summary to the user on Telegram
 
 **When the user says "add topic X" or "follow @person":**

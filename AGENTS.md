@@ -172,8 +172,8 @@
 │       └── foodlog/
 │           ├── SKILL.md
 │           └── foods.md
-├── .bird-config/               # bird CLI cookie auth (persistent)
-│   └── config.json5
+├── scripts/                    # Deterministic scripts (digest, etc.)
+│   └── generate-digest.sh
 ├── cron/                       # Cron job state
 │   └── jobs.json
 ├── agents/                     # Agent sessions and models

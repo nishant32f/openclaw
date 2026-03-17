@@ -15,7 +15,7 @@ WORKSPACE_DIR="$REPO_DIR/workspace"
 REMOTE_WORKSPACE="/data/workspace"
 DIGEST_REPO="nishant32f/digest"
 GW_URL="ws://127.0.0.1:3000"
-DIGEST_MODEL="openrouter/anthropic/claude-sonnet-4"
+DIGEST_MODEL="openrouter/anthropic/claude-haiku-4-5"
 
 # Colors
 RED='\033[0;31m'
@@ -29,6 +29,11 @@ fail()  { echo -e "${RED}[✗]${NC} $*"; exit 1; }
 step()  { echo -e "\n${GREEN}==> $*${NC}"; }
 
 # ─── Preflight checks ───────────────────────────────────────────────
+
+# Helper: pipe local file to remote path via fly ssh
+push_file() {
+  fly ssh console -a "$APP" -C "sh -c 'cat > $2'" < "$1"
+}
 
 step "Preflight checks"
 
@@ -93,6 +98,15 @@ step "Syncing workspace files"
 "$SCRIPT_DIR/sync-workspace-to-fly.sh" "$APP"
 info "Workspace synced"
 
+# ─── Sync digest script to persistent volume ─────────────────────────
+
+step "Syncing digest script"
+
+fly ssh console -a "$APP" -C "mkdir -p /data/scripts" 2>/dev/null
+push_file "$SCRIPT_DIR/generate-digest.sh" "/data/scripts/generate-digest.sh"
+fly ssh console -a "$APP" -C "chmod +x /data/scripts/generate-digest.sh"
+info "Digest script synced to /data/scripts/"
+
 # ─── Setup GitHub Pages ─────────────────────────────────────────────
 
 step "Configuring GitHub Pages on $DIGEST_REPO"
@@ -138,8 +152,8 @@ fly ssh console -a "$APP" -C "sh -c 'bird whoami --plain 2>/dev/null && echo \"b
 
 step "Setting up cron jobs"
 
-MORNING_MSG='Run a morning digest using the digest skill. Search X/Twitter for AI posts from the last 12 hours using the topics and people in the digest config. Create a digest post and push it to GitHub. Then send me a short summary on Telegram.'
-EVENING_MSG='Run an evening digest using the digest skill. Search X/Twitter for AI posts from the last 12 hours using the topics and people in the digest config. Create a digest post and push it to GitHub. Then send me a short summary on Telegram.'
+MORNING_MSG='Run this exact command using the exec tool: /data/scripts/generate-digest.sh morning — Do not do anything else. Just run that one command.'
+EVENING_MSG='Run this exact command using the exec tool: /data/scripts/generate-digest.sh evening — Do not do anything else. Just run that one command.'
 
 # Push a cron setup script to avoid nested quoting issues
 CRON_SETUP=$(mktemp)

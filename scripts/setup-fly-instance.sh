@@ -3,8 +3,8 @@
 # Usage: ./scripts/setup-fly-instance.sh [app-name]
 #
 # This script is idempotent — safe to re-run.
-# It handles: dependency checks, config push, workspace sync, cron setup,
-# GitHub Pages repo setup, and gateway restart.
+# It handles: dependency checks, config push, workspace sync, bird auth,
+# cron setup, GitHub Pages repo setup, and gateway restart.
 
 set -euo pipefail
 
@@ -43,11 +43,11 @@ info "GitHub CLI authenticated"
 [ -d "$WORKSPACE_DIR" ] || fail "workspace/ directory not found at $WORKSPACE_DIR"
 info "Local workspace found"
 
-# ─── Check remote dependencies (batched into one SSH call) ───────────
+# ─── Check & install remote dependencies ─────────────────────────────
 
 step "Checking remote dependencies"
 
-DEP_STATUS=$(fly ssh console -a "$APP" -C "sh -c 'for cmd in gh git openclaw; do which \$cmd >/dev/null 2>&1 && echo \"OK:\$cmd\" || echo \"MISSING:\$cmd\"; done'" 2>/dev/null || echo "MISSING:gh")
+DEP_STATUS=$(fly ssh console -a "$APP" -C "sh -c 'for cmd in gh git openclaw bird; do which \$cmd >/dev/null 2>&1 && echo \"OK:\$cmd\" || echo \"MISSING:\$cmd\"; done'" 2>/dev/null || echo "MISSING:gh")
 
 echo "$DEP_STATUS" | while IFS=: read -r status cmd; do
   if [ "$status" = "OK" ]; then
@@ -57,12 +57,12 @@ echo "$DEP_STATUS" | while IFS=: read -r status cmd; do
   fi
 done
 
-if echo "$DEP_STATUS" | grep -q "MISSING:gh"; then
-  warn "Attempting to install gh..."
-  fly ssh console -a "$APP" -C "sh -c 'apt-get update -qq && apt-get install -y -qq gh'" 2>/dev/null || warn "Could not install gh"
+# gh and bird are baked into the Docker image. If missing, redeploy.
+if echo "$DEP_STATUS" | grep -q "MISSING:gh\|MISSING:bird"; then
+  warn "gh or bird missing on remote — run 'fly deploy' to rebuild the Docker image"
 fi
 
-# ─── Push config (single SSH call) ──────────────────────────────────
+# ─── Push config ─────────────────────────────────────────────────────
 
 step "Pushing openclaw.json config"
 
@@ -73,7 +73,7 @@ else
   warn "No openclaw.json found at repo root — skipping config push"
 fi
 
-# ─── Sync secrets (--stage to avoid premature restart) ───────────────
+# ─── Sync secrets (--stage to defer restart) ─────────────────────────
 
 step "Syncing secrets"
 
@@ -85,24 +85,12 @@ else
   warn "No .env found — skipping secrets sync"
 fi
 
-# ─── Sync workspace (delegates to sync script) ──────────────────────
+# ─── Sync workspace ─────────────────────────────────────────────────
 
 step "Syncing workspace files"
 
 "$SCRIPT_DIR/sync-workspace-to-fly.sh" "$APP"
 info "Workspace synced"
-
-# ─── Setup digest repo on remote (for gh API access) ────────────────
-
-step "Setting up digest repo access"
-
-if fly ssh console -a "$APP" -C "sh -c 'test -n \"\$GH_TOKEN\" && echo ok'" 2>/dev/null | grep -q ok; then
-  info "GH_TOKEN secret is set on remote"
-else
-  warn "GH_TOKEN not set on remote. The digest skill needs it to push to GitHub."
-  warn "Set it with: fly secrets set GH_TOKEN=ghp_xxx -a $APP"
-  warn "Generate a fine-grained token at: https://github.com/settings/personal-access-tokens/new"
-fi
 
 # ─── Setup GitHub Pages ─────────────────────────────────────────────
 
@@ -115,12 +103,12 @@ if echo "$PAGES_STATUS" | grep -q "NOT_ENABLED\|Not Found"; then
     -f "source[branch]=main" \
     -f "source[path]=/" 2>/dev/null || \
     warn "Could not auto-enable GitHub Pages. Enable manually: repo Settings → Pages → Source: main branch"
-  info "GitHub Pages enabled (may take a few minutes to build)"
+  info "GitHub Pages enabled"
 else
   info "GitHub Pages already configured"
 fi
 
-# ─── Restart gateway ────────────────────────────────────────────────
+# ─── Restart gateway (deploys staged secrets) ───────────────────────
 
 step "Restarting gateway to pick up all changes"
 
@@ -129,26 +117,49 @@ if [ -n "$MACHINE_ID" ]; then
   fly machines restart "$MACHINE_ID" -a "$APP" 2>&1 || warn "Could not restart machine $MACHINE_ID"
   info "Gateway restarting (machine $MACHINE_ID)"
 else
-  warn "Could not determine machine ID. Restart manually: fly machines restart <id> -a $APP"
+  warn "Could not determine machine ID. Restart manually."
 fi
 
-# ─── Setup cron jobs (after gateway is up) ───────────────────────────
+# ─── Wait for gateway to boot ───────────────────────────────────────
 
-step "Setting up cron jobs (waiting for gateway...)"
-
+step "Waiting for gateway to boot..."
 sleep 25
+
+# ─── Setup bird auth (after restart so secrets are live) ─────────────
+
+step "Verifying bird for X/Twitter"
+
+# bird reads AUTH_TOKEN and CT0 env vars directly (set via Fly secrets).
+# No config file needed — env vars are the cleanest path on headless servers.
+fly ssh console -a "$APP" -C "sh -c 'bird whoami --plain 2>/dev/null && echo \"bird: authenticated\" || echo \"bird: not authenticated — set AUTH_TOKEN and CT0 in .env\"'" 2>&1
+
+# ─── Setup cron jobs (deduplicate first) ─────────────────────────────
+
+step "Setting up cron jobs"
 
 MORNING_MSG='Read the digest skill (workspace skills/digest/SKILL.md). Run a morning digest: search X/Twitter for AI posts from the last 12 hours using the topics and people in digest.config.json. Create a digest post and push it to the nishant32f/digest GitHub repo. Then send me a short summary of the digest on Telegram.'
 EVENING_MSG='Read the digest skill (workspace skills/digest/SKILL.md). Run an evening digest: search X/Twitter for AI posts from the last 12 hours using the topics and people in digest.config.json. Create a digest post and push it to the nishant32f/digest GitHub repo. Then send me a short summary of the digest on Telegram.'
 
-# Create both cron jobs + verify in a single SSH call
-fly ssh console -a "$APP" -C "sh -c '
-  GW=\"--url $GW_URL --token \$OPENCLAW_GATEWAY_TOKEN\"
-  openclaw cron add \$GW --cron \"30 3 * * *\" --tz Asia/Kolkata --name digest-morning --timeout-seconds 120 --channel telegram --message \"$MORNING_MSG\" 2>/dev/null || echo \"Morning cron may already exist\"
-  openclaw cron add \$GW --cron \"30 15 * * *\" --tz Asia/Kolkata --name digest-evening --timeout-seconds 120 --channel telegram --message \"$EVENING_MSG\" 2>/dev/null || echo \"Evening cron may already exist\"
-  echo \"---CRON LIST---\"
-  openclaw cron list \$GW 2>/dev/null || echo \"Could not list cron jobs\"
-'" 2>&1 || warn "Cron setup failed — gateway may still be booting. Run manually after gateway is up."
+# Push a cron setup script to avoid nested quoting issues
+CRON_SETUP=$(mktemp)
+cat > "$CRON_SETUP" <<CRONSCRIPT
+#!/bin/sh
+GW="--url $GW_URL --token \$OPENCLAW_GATEWAY_TOKEN"
+# Remove existing digest crons to avoid duplicates
+for name in digest-morning digest-evening; do
+  ID=\$(openclaw cron list \$GW --json 2>/dev/null | jq -r ".jobs[] | select(.name==\"\$name\") | .id" 2>/dev/null)
+  if [ -n "\$ID" ]; then
+    openclaw cron rm "\$ID" \$GW 2>/dev/null && echo "Removed old \$name"
+  fi
+done
+openclaw cron add \$GW --cron "30 3 * * *" --tz Asia/Kolkata --name digest-morning --timeout-seconds 120 --channel telegram --message "$MORNING_MSG" 2>/dev/null || echo "Morning cron failed"
+openclaw cron add \$GW --cron "30 15 * * *" --tz Asia/Kolkata --name digest-evening --timeout-seconds 120 --channel telegram --message "$EVENING_MSG" 2>/dev/null || echo "Evening cron failed"
+echo "---CRON LIST---"
+openclaw cron list \$GW 2>/dev/null || echo "Could not list cron jobs"
+CRONSCRIPT
+
+fly ssh console -a "$APP" -C "sh -c 'cat > /tmp/cron-setup.sh && chmod +x /tmp/cron-setup.sh && /tmp/cron-setup.sh && rm -f /tmp/cron-setup.sh'" < "$CRON_SETUP" 2>&1 || warn "Cron setup failed — gateway may still be booting."
+rm -f "$CRON_SETUP"
 
 info "Cron jobs configured"
 

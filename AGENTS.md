@@ -130,7 +130,7 @@
 - Cron CLI: `openclaw cron add` (not `create`). Key flags: `--cron "<expr>" --tz Asia/Kolkata --name <name> --channel telegram --message "<msg>" --timeout-seconds 120`.
 - Restart machine: `fly machines restart 08070dda1555e8 -a pawalker-openclaw` (machine ID required in non-interactive mode).
 - `fly secrets import` restarts the machine automatically — no separate restart needed after secrets sync.
-- `gh` is not pre-installed on the Fly Docker image. Install with: `fly ssh console -a pawalker-openclaw -C "sh -c 'apt-get update -qq && apt-get install -y -qq gh'"`. It gets wiped on redeploy.
+- `gh` and `bird` are baked into the Docker image (see Dockerfile). No need to install them manually after deploy.
 - Workspace lives at `/data/workspace/` on the persistent volume (configured via `agents.defaults.workspace` in `openclaw.json`). This **survives deploys** — no re-sync needed after `fly deploy`.
 - The ephemeral filesystem (`/home/node/`) is wiped on every deploy. Never store anything important there.
 
@@ -145,6 +145,8 @@
 - Digest config: `workspace/skills/digest/digest.config.json` (topics, people, schedule).
 - Food log skill: `workspace/skills/foodlog/SKILL.md` + `foods.md` (calorie database).
 - `GH_TOKEN` (fine-grained PAT, scoped to `nishant32f/digest` only) must be in `.env` for the digest skill to push to GitHub.
+- `BIRD_AUTH_TOKEN` and `BIRD_CT0` (X/Twitter cookies) must be in `.env` for the digest skill to read X via `bird`. Cookies expire periodically — refresh from browser DevTools when bird auth fails.
+- bird CLI (`@steipete/bird`): deprecated but functional X/Twitter GraphQL CLI using cookie auth. Installed on Fly via setup script. Config persisted at `/data/.bird-config/config.json5`.
 - Deploy latest code: `fly deploy -a pawalker-openclaw` (builds Docker image from local code). Workspace on `/data/` survives; cron jobs on `/data/cron/` survive; `gh` must be reinstalled after deploy.
 - After deploy: only need to reinstall `gh` if the digest skill uses it on the remote. Workspace and cron persist.
 - Full redeploy checklist: `fly deploy` → verify gateway up → reinstall `gh` if needed.
@@ -170,6 +172,8 @@
 │       └── foodlog/
 │           ├── SKILL.md
 │           └── foods.md
+├── .bird-config/               # bird CLI cookie auth (persistent)
+│   └── config.json5
 ├── cron/                       # Cron job state
 │   └── jobs.json
 ├── agents/                     # Agent sessions and models

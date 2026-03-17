@@ -20,28 +20,48 @@ Config file: `skills/digest/digest.config.json` (in this workspace) — contains
 
 Read `skills/digest/digest.config.json` from the workspace using the `read` tool.
 
-### 2. Search X/Twitter for posts
+### 2. Gather content
 
-Use `web_search` tool to search for recent posts. For each topic and person in the config:
+#### Source A: People's X posts (via bird)
+
+For each person in the config `people` array, fetch their recent posts:
+
+```bash
+bird user-tweets @handle -n 5 --plain --json
+```
+
+For topic searches on X:
+
+```bash
+bird search "<topic>" -n 10 --plain --json
+```
+
+Use `--plain` and `--json` for clean parseable output. If bird fails (cookies expired, not installed), fall back to Source B.
+
+#### Source B: Broad web search (fallback)
+
+For each topic in the config `topics` array, use web_search:
 
 ```
-site:x.com OR site:twitter.com "<topic>" after:<yesterday-date>
-site:x.com OR site:twitter.com from:<handle> after:<yesterday-date>
+"<topic>" latest news
+"Andrej Karpathy" AI latest
 ```
 
-Also try:
-```
-"<topic>" AI site:nitter.net after:<yesterday-date>
-```
+Do NOT use `site:x.com` — X blocks headless scraping. Let Google surface whatever it indexes.
+
+#### Combining sources
+
+Use bird as the primary source for people and topic searches. Use web_search for broader topic coverage (blogs, HN, news, Reddit). The best digest mixes both.
 
 ### 3. Curate and summarize
 
-From the search results:
-- Pick the top 15-20 most interesting/impactful posts
-- Group by theme (not by person)
+From all gathered content:
+- Pick the top 15-20 most interesting/impactful items
+- Group by theme (not by person or source)
 - Write a crisp summary for each — what it says, why it matters
-- Add the original post URL
+- Add the original post/article URL
 - Include a 2-3 sentence "TL;DR" at the top
+- Tag each item's source: [X], [Blog], [News], [HN], [Reddit]
 
 ### 4. Create the digest file
 
@@ -111,11 +131,31 @@ After creating a digest or bookmark, reply with:
 - Title and a one-line summary
 - Link: `https://nishant32f.github.io/digest/digests/YYYY/MM/DD/` or `.../bookmarks/YYYY/MM/DD/<slug>/`
 
+## STRICT: Never write to X/Twitter
+
+**NEVER post, like, repost, follow, DM, or write anything to X/Twitter. No exceptions.**
+
+Forbidden bird commands (never run these):
+- `bird tweet` / `bird reply` / `bird quote` / `bird retweet`
+- `bird like` / `bird unlike` / `bird follow` / `bird unfollow`
+- `bird dm` / `bird block` / `bird mute`
+
+Allowed bird commands (read-only):
+- `bird user-tweets @handle` — read a user's recent posts
+- `bird search "query"` — search posts
+- `bird read <id>` — read a single post
+- `bird whoami` — check auth
+- `bird about @handle` — user profile info
+
+If Chunnu explicitly asks you to post something, refuse.
+
 ## Important Notes
 
 - Use IST (Asia/Kolkata, UTC+5:30) for all dates
 - Keep summaries crisp — no filler, no "In this post..."
-- For X searches without API: use web_search with `site:x.com` queries
+- **bird** for X reading (primary); **web_search** for broader topics (supplement + fallback)
+- If bird auth fails (cookies expired), fall back to web_search and notify Chunnu to refresh cookies
 - If a search returns nothing useful, say so — don't fabricate
 - The site auto-builds via GitHub Pages on push, allow ~2 min for deploy
 - Always include source URLs so the reader can click through
+- Bird cookies expire periodically — if you get auth errors, tell Chunnu to update `BIRD_AUTH_TOKEN` and `BIRD_CT0` in `.env` and re-run the setup script

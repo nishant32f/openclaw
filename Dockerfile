@@ -251,6 +251,16 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw \
  && chmod 755 /app/openclaw.mjs
 
+# Install extra tools used by workspace skills and setup scripts.
+# - gh: GitHub CLI (digest skill pushes to GitHub Pages)
+# - jq: JSON processing (setup scripts, agent workflows)
+# - bird: X/Twitter GraphQL CLI with cookie auth (digest skill reads X)
+# - clawhub: OpenClaw skill registry CLI (install/manage skills)
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends gh jq \
+ && rm -rf /var/lib/apt/lists/*
+RUN npm install -g @steipete/bird clawhub 2>/dev/null || true
+
 ENV NODE_ENV=production
 
 # Security hardening: Run as non-root user

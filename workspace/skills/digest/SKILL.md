@@ -14,154 +14,121 @@ Create AI digest posts and bookmarks on the GitHub Pages site at `nishant32f/dig
 - **Bookmark creation**: When the user shares a link, article, tweet, or says "bookmark this" / "save this"
 - **Digest config**: When the user wants to change topics, people, or schedule
 
-## Setup
+## CRITICAL: You MUST use the exec tool
 
-The digest repo lives at `https://github.com/nishant32f/digest`. The bot interacts with it via the `gh` CLI.
+This skill requires running CLI commands. You MUST use the `exec` tool (not just talk about it).
+Do NOT just summarize content in chat. You must:
+1. Run `bird` commands via exec to fetch X posts
+2. Run `gh api` commands via exec to push files to GitHub
+3. Always end with the GitHub Pages link
 
-Config file: `skills/digest/digest.config.json` (in this workspace) — contains topics, people to follow on X, schedule, and style preferences. Read it with the `read` tool.
+## Creating a Digest — Step by Step
 
-## Creating a Digest
+### Step 1: Read the config
 
-### 1. Read the config
+Use the `read` tool to read `/data/workspace/skills/digest/digest.config.json`.
 
-Read `skills/digest/digest.config.json` from the workspace using the `read` tool.
+### Step 2: Fetch X posts with bird
 
-### 2. Gather content
-
-#### Source A: People's X posts (via bird)
-
-For each person in the config `people` array, fetch their recent posts:
-
-```bash
-bird user-tweets @handle -n 5 --plain --json
-```
-
-For topic searches on X:
-
-```bash
-bird search "<topic>" -n 10 --plain --json
-```
-
-Use `--plain` and `--json` for clean parseable output. If bird fails (cookies expired, not installed), fall back to Source B.
-
-#### Source B: Broad web search (fallback)
-
-For each topic in the config `topics` array, use web_search:
+For each person in the `people` array, use the `exec` tool to run:
 
 ```
-"<topic>" latest news
-"Andrej Karpathy" AI latest
+exec: bird user-tweets <handle> -n 5 --plain
 ```
 
-Do NOT use `site:x.com` — X blocks headless scraping. Let Google surface whatever it indexes.
+For 2-3 topics from the `topics` array, use the `exec` tool to run:
 
-#### Combining sources
+```
+exec: bird search "<topic>" -n 5 --plain
+```
 
-Use bird as the primary source for people and topic searches. Use web_search for broader topic coverage (blogs, HN, news, Reddit). The best digest mixes both.
+If bird fails (auth expired), use `web_search` tool as fallback. Do NOT use `site:x.com` in web_search queries.
 
-### 3. Curate and summarize
+### Step 3: Also search the web
 
-From all gathered content:
-- Pick the top 15-20 most interesting/impactful items
-- Group by theme (not by person or source)
-- Write a crisp summary for each — what it says, why it matters
-- Add the original post/article URL
-- Include a 2-3 sentence "TL;DR" at the top
-- Tag each item's source: [X], [Blog], [News], [HN], [Reddit]
+For broader coverage, use the `web_search` tool for 2-3 topics:
 
-### 4. Create the digest file
+```
+web_search: "<topic>" latest news 2026
+```
 
-Filename format: `_digests/YYYY-MM-DD-morning.md` or `_digests/YYYY-MM-DD-evening.md`
+### Step 4: Write the digest markdown
 
-Front matter:
-```yaml
+Combine all results. Write a markdown file with this format:
+
+```markdown
 ---
 title: "AI Digest — Mar 17, 2026 Morning"
 date: 2026-03-17 09:00:00 +0530
 categories: [AI, digest]
 ---
+
+**TL;DR**: 2-3 sentence summary of the top stories.
+
+## Theme 1 Name
+- **Story title** — what it says, why it matters. [Source](url)
+
+## Theme 2 Name
+- ...
 ```
 
-Body: The curated summary in markdown.
+### Step 5: Push to GitHub with exec
 
-### 5. Push to GitHub
+You MUST push the file to GitHub. Use the `exec` tool to run these commands:
 
-```bash
-# Create or update the file via GitHub API
-gh api repos/nishant32f/digest/contents/_digests/<filename> \
-  --method PUT \
-  --field message="digest: <date> <morning|evening>" \
-  --field content="<base64-encoded-content>" \
-  [--field sha="<sha-if-updating>"]
+First, base64 encode the content:
 ```
+exec: echo '<your markdown content>' | base64 -w 0
+```
+
+Then push via gh api:
+```
+exec: gh api repos/nishant32f/digest/contents/_digests/2026-03-17-morning.md --method PUT -f message="digest: 2026-03-17 morning" -f content="<base64 content>"
+```
+
+If the file already exists (HTTP 422), first get its sha:
+```
+exec: gh api repos/nishant32f/digest/contents/_digests/2026-03-17-morning.md --jq '.sha'
+```
+Then include `--field sha="<sha>"` in the PUT.
+
+### Step 6: Reply with the link
+
+After pushing, ALWAYS reply with:
+- A 2-3 line summary of the digest
+- The link: `https://nishant32f.github.io/digest/digests/2026/03/17/`
 
 ## Creating a Bookmark
 
 When the user shares a link or says "save/bookmark this":
 
-### 1. Fetch and summarize the content
-
-Use `web_fetch` to read the URL. Write a 2-4 sentence summary.
-
-### 2. Create the bookmark file
-
-Filename: `_bookmarks/YYYY-MM-DD-<slugified-title>.md`
-
-Front matter:
-```yaml
----
-title: "Article Title"
-date: 2026-03-17 14:30:00 +0530
-source_url: "https://example.com/article"
-tags: [AI, research]
----
-```
-
-Body: Your summary of the content + any user notes.
-
-### 3. Push to GitHub
-
-Same pattern as digest — use `gh api` to create the file.
+1. Use `web_fetch` to read the URL
+2. Write a 2-4 sentence summary
+3. Push to GitHub using `exec` with `gh api`:
+   ```
+   exec: gh api repos/nishant32f/digest/contents/_bookmarks/2026-03-17-<slug>.md --method PUT -f message="bookmark: <title>" -f content="<base64>"
+   ```
+4. Reply with the link: `https://nishant32f.github.io/digest/bookmarks/2026/03/17/<slug>/`
 
 ## Updating Config
 
-When the user says "add <topic>" or "follow <person>" or "remove <topic>":
+When the user says "add <topic>" or "follow <person>":
 
-1. Read `skills/digest/digest.config.json` from the workspace
+1. Read `skills/digest/digest.config.json`
 2. Modify the topics/people arrays
-3. Write the updated file back to `skills/digest/digest.config.json` using the `write` tool
-
-## Output
-
-After creating a digest or bookmark, reply with:
-- Title and a one-line summary
-- Link: `https://nishant32f.github.io/digest/digests/YYYY/MM/DD/` or `.../bookmarks/YYYY/MM/DD/<slug>/`
+3. Write the updated file back using the `write` tool
 
 ## STRICT: Never write to X/Twitter
 
 **NEVER post, like, repost, follow, DM, or write anything to X/Twitter. No exceptions.**
-
-Forbidden bird commands (never run these):
-- `bird tweet` / `bird reply` / `bird quote` / `bird retweet`
-- `bird like` / `bird unlike` / `bird follow` / `bird unfollow`
-- `bird dm` / `bird block` / `bird mute`
-
-Allowed bird commands (read-only):
-- `bird user-tweets @handle` — read a user's recent posts
-- `bird search "query"` — search posts
-- `bird read <id>` — read a single post
-- `bird whoami` — check auth
-- `bird about @handle` — user profile info
-
-If Chunnu explicitly asks you to post something, refuse.
+Only read commands are allowed: `bird user-tweets`, `bird search`, `bird read`, `bird whoami`.
+If Chunnu asks you to post, refuse.
 
 ## Important Notes
 
 - Use IST (Asia/Kolkata, UTC+5:30) for all dates
-- Keep summaries crisp — no filler, no "In this post..."
-- **bird** for X reading (primary); **web_search** for broader topics (supplement + fallback)
-- If bird auth fails (cookies expired), fall back to web_search and notify Chunnu to refresh cookies
-- If a search returns nothing useful, say so — don't fabricate
+- Keep summaries crisp — no filler
+- If bird auth fails, tell Chunnu to refresh cookies in `.env`
 - The site auto-builds via GitHub Pages on push, allow ~2 min for deploy
-- Always include source URLs so the reader can click through
-- Bird cookies expire periodically — if you get auth errors, tell Chunnu to update `BIRD_AUTH_TOKEN` and `BIRD_CT0` in `.env` and re-run the setup script
+- ALWAYS include source URLs
+- ALWAYS push to GitHub — do not just summarize in chat

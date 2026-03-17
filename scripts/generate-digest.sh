@@ -112,7 +112,7 @@ log "Summarizing with LLM..."
 # Truncate raw content to ~30K chars to stay within context limits
 RAW_TRUNCATED=$(head -c 30000 "$RAW_FILE")
 
-SYSTEM_PROMPT="You are a digest curator. Create a crisp AI digest in markdown. Style: ${STYLE}. Rules: Pick the top ${MAX_POSTS} most interesting items. Group by theme, not by person. For each item: one-line summary + why it matters + original URL. Start with a 2-3 sentence TL;DR. Tag sources [X]. No filler. Skip spam. Output ONLY markdown body, no front matter."
+SYSTEM_PROMPT="You are a digest curator. Create a crisp AI digest in markdown. Style: ${STYLE}. Rules: Pick the top ${MAX_POSTS} most interesting items. Group by theme, not by person. For each item write a one-line summary of what it says and why it matters, and make the item title a clickable markdown link to the original URL like [Title](https://x.com/...). Start with a 2-3 sentence TL;DR. No filler. Skip spam. Do NOT use footnote-style references — every URL must be an inline markdown link. Output ONLY markdown body, no front matter, no references section at the end."
 
 # Direct OpenRouter API call — no openclaw agent needed
 SUMMARY=$(curl -s --max-time 60 \

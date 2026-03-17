@@ -91,12 +91,64 @@
 - Full guide: `docs/install/fly.md`. Config files: `fly.toml` (public), `fly.private.toml` (no public IP).
 - Non-loopback binding (`--bind lan`) **requires** `gateway.controlUi.allowedOrigins` in `/data/openclaw.json`. Without it the gateway crashes on startup. There is no env var override; the config file must exist before first start.
 - Minimum VM: `shared-cpu-4x` / 4GB. `shared-cpu-2x` hangs on cold starts (module init too slow for 2 vCPUs).
-- `fly ssh console -C` does not support `&&` or shell redirection. Use `sh -c '...'` or pipe via `echo '...' | fly ssh console -C "tee /path"`.
+- `fly ssh console -C` does not support `&&` or shell redirection. Wrap in `sh -c '...'`. To pipe a local file to remote: `fly ssh console -a <app> -C "sh -c 'cat > /remote/path'" < local/file`.
 - Config file written via SSH is owned by `root`; run `fly ssh console -C "chown node:node /data/openclaw.json"` so the gateway (runs as `node` user) can read it.
 - Never use `dangerouslyAllowHostHeaderOriginFallback` on internet-facing deployments (CORS bypass risk).
-- App name: `pawalker-openclaw`. Local config: `openclaw.json` (repo root). Local secrets: `.env` (gitignored).
+- App name: `pawalker-openclaw`. Machine ID: `08070dda1555e8`. Local config: `openclaw.json` (repo root). Local secrets: `.env` (gitignored).
 - Push config to Fly: `fly ssh console -a pawalker-openclaw -C "sh -c 'cat > /data/openclaw.json'" < openclaw.json && fly ssh console -a pawalker-openclaw -C "chown node:node /data/openclaw.json"`
 - Sync secrets to Fly from `.env`: `fly secrets import -a pawalker-openclaw < .env`
+- **Gateway port on Fly is 3000** (not 18789). The Dockerfile/entrypoint uses `--port 3000 --bind lan`.
+- CLI commands that talk to the gateway on Fly need explicit URL + token: `--url ws://127.0.0.1:3000 --token $OPENCLAW_GATEWAY_TOKEN`. Without these, commands default to port 18789 and fail.
+- Cron CLI: `openclaw cron add` (not `create`). Key flags: `--cron "<expr>" --tz Asia/Kolkata --name <name> --channel telegram --message "<msg>" --timeout-seconds 120`.
+- Restart machine: `fly machines restart 08070dda1555e8 -a pawalker-openclaw` (machine ID required in non-interactive mode).
+- `fly secrets import` restarts the machine automatically — no separate restart needed after secrets sync.
+- `gh` is not pre-installed on the Fly Docker image. Install with: `fly ssh console -a pawalker-openclaw -C "sh -c 'apt-get update -qq && apt-get install -y -qq gh'"`. It gets wiped on redeploy.
+- Workspace lives at `/data/workspace/` on the persistent volume (configured via `agents.defaults.workspace` in `openclaw.json`). This **survives deploys** — no re-sync needed after `fly deploy`.
+- The ephemeral filesystem (`/home/node/`) is wiped on every deploy. Never store anything important there.
+
+## Fly.io workspace & scripts
+
+- **Reproducibility principle**: everything on the Fly instance must be reproducible via scripts. No ad-hoc SSH commands.
+- Full instance setup: `./scripts/setup-fly-instance.sh [app-name]` (idempotent — safe to re-run).
+- Quick workspace sync: `./scripts/sync-workspace-to-fly.sh [app-name]`.
+- Workspace source of truth: `workspace/` directory in the repo root.
+- Skills live under `workspace/skills/<name>/SKILL.md` + supporting files.
+- Digest site repo: `nishant32f/digest` (GitHub Pages at `nishant32f.github.io/digest`).
+- Digest config: `workspace/skills/digest/digest.config.json` (topics, people, schedule).
+- Food log skill: `workspace/skills/foodlog/SKILL.md` + `foods.md` (calorie database).
+- `GH_TOKEN` (fine-grained PAT, scoped to `nishant32f/digest` only) must be in `.env` for the digest skill to push to GitHub.
+- Deploy latest code: `fly deploy -a pawalker-openclaw` (builds Docker image from local code). Workspace on `/data/` survives; cron jobs on `/data/cron/` survive; `gh` must be reinstalled after deploy.
+- After deploy: only need to reinstall `gh` if the digest skill uses it on the remote. Workspace and cron persist.
+- Full redeploy checklist: `fly deploy` → verify gateway up → reinstall `gh` if needed.
+
+## Fly.io persistent volume layout
+
+```
+/data/                          # Persistent volume (survives deploys)
+├── openclaw.json               # Gateway config
+├── workspace/                  # Agent workspace (agents.defaults.workspace)
+│   ├── AGENTS.md
+│   ├── SOUL.md
+│   ├── IDENTITY.md
+│   ├── USER.md
+│   ├── MEMORY.md
+│   ├── TOOLS.md
+│   ├── HEARTBEAT.md
+│   ├── BOOTSTRAP.md
+│   └── skills/
+│       ├── digest/
+│       │   ├── SKILL.md
+│       │   └── digest.config.json
+│       └── foodlog/
+│           ├── SKILL.md
+│           └── foods.md
+├── cron/                       # Cron job state
+│   └── jobs.json
+├── agents/                     # Agent sessions and models
+├── credentials/                # Channel credentials
+├── telegram/                   # Telegram session state
+└── devices/                    # Device pairing state
+```
 
 ## exe.dev VM ops (general)
 

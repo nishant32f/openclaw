@@ -12,6 +12,7 @@
   },
   "agents": {
     "defaults": {
+      "workspace": "/data/workspace",
       "model": {
         "primary": "openrouter/deepseek/deepseek-chat",
         "fallbacks": [

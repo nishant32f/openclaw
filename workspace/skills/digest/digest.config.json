@@ -1,0 +1,49 @@
+{
+  "topics": [
+    "AI agents",
+    "LLM breakthroughs",
+    "AI coding assistants",
+    "open source AI models",
+    "AI startups funding",
+    "Claude Anthropic",
+    "OpenAI GPT",
+    "NVIDIA AI",
+    "AI regulation policy",
+    "Shopify development",
+    "Shopify AI apps",
+    "stoicism daily",
+    "personal growth founders",
+    "SaaS startups"
+  ],
+  "people": [
+    "@karpathy",
+    "@sama",
+    "@DarioAmodei",
+    "@AmandaAskell",
+    "@bcherny",
+    "@jackclarkSF",
+    "@ylecun",
+    "@AndrewYNg",
+    "@drfeifei",
+    "@fchollet",
+    "@swyx",
+    "@simonw",
+    "@emollick",
+    "@DrJimFan",
+    "@demishassabis",
+    "@gregisenberg",
+    "@levelsio",
+    "@hwchase17",
+    "@realGeorgeHotz",
+    "@goodside",
+    "@ilyasut",
+    "@gdb",
+    "@arthurmensch"
+  ],
+  "schedule": {
+    "morning": "09:00 IST",
+    "evening": "21:00 IST"
+  },
+  "maxPostsPerDigest": 20,
+  "summaryStyle": "crisp, opinionated, no fluff — highlight what actually matters and why"
+}

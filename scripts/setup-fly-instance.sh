@@ -167,8 +167,8 @@ for name in digest-morning digest-evening; do
     openclaw cron rm "\$ID" \$GW 2>/dev/null && echo "Removed old \$name"
   fi
 done
-openclaw cron add \$GW --cron "30 3 * * *" --tz Asia/Kolkata --name digest-morning --timeout-seconds 180 --channel telegram --model "$DIGEST_MODEL" --message "$MORNING_MSG" 2>/dev/null || echo "Morning cron failed"
-openclaw cron add \$GW --cron "30 15 * * *" --tz Asia/Kolkata --name digest-evening --timeout-seconds 180 --channel telegram --model "$DIGEST_MODEL" --message "$EVENING_MSG" 2>/dev/null || echo "Evening cron failed"
+openclaw cron add \$GW --cron "30 3 * * *" --tz Asia/Kolkata --name digest-morning --timeout-seconds 180 --no-deliver --model "$DIGEST_MODEL" --message "$MORNING_MSG" 2>/dev/null || echo "Morning cron failed"
+openclaw cron add \$GW --cron "30 15 * * *" --tz Asia/Kolkata --name digest-evening --timeout-seconds 180 --no-deliver --model "$DIGEST_MODEL" --message "$EVENING_MSG" 2>/dev/null || echo "Evening cron failed"
 echo "---CRON LIST---"
 openclaw cron list \$GW 2>/dev/null || echo "Could not list cron jobs"
 CRONSCRIPT

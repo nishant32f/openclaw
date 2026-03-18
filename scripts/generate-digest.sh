@@ -196,7 +196,7 @@ log "Published: $PAGES_URL"
 
 log "Sending Telegram notification..."
 
-# Extract first 3 lines of summary for the notification
+# Extract TL;DR for the notification
 TLDR=$(echo "$SUMMARY" | head -5 | sed 's/\*//g' | head -3)
 
 NOTIFY_MSG="📰 ${TITLE}
@@ -205,12 +205,12 @@ ${TLDR}
 
 🔗 ${PAGES_URL}"
 
-openclaw message send \
-  --channel telegram \
-  --target "${TELEGRAM_OWNER_ID:-834301102}" \
-  --message "$NOTIFY_MSG" \
-  --url ws://127.0.0.1:3000 \
-  --token "$OPENCLAW_GATEWAY_TOKEN" \
-  2>/dev/null || log "WARN: Telegram notification failed"
+# Direct Telegram Bot API call — more reliable than openclaw message send
+curl -s --max-time 10 \
+  -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+  --data-urlencode "chat_id=${TELEGRAM_OWNER_ID}" \
+  --data-urlencode "text=${NOTIFY_MSG}" \
+  --data-urlencode "disable_web_page_preview=true" \
+  >/dev/null 2>&1 || log "WARN: Telegram notification failed"
 
 log "Done!"

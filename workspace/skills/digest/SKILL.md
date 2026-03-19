@@ -54,7 +54,14 @@ web_search: "<topic>" latest news 2026
 
 ### Step 4: Write the digest markdown
 
-Combine all results. Write a markdown file with this format:
+Combine all results. **Deduplicate before writing:**
+
+- If multiple people quote-tweeted or commented on the same original post, keep only the most insightful take and link the original.
+- If a topic search result already appeared in a person's feed, drop the duplicate.
+- If two posts convey the same news/announcement (e.g. a product launch covered by both the company and a commentator), merge into one entry with both sources.
+- Prefer the post with more context/substance over a bare repost.
+
+Write a markdown file with this format:
 
 ```markdown
 ---

@@ -196,20 +196,30 @@ log "Published: $PAGES_URL"
 
 log "Sending Telegram notification..."
 
-# Extract TL;DR for the notification
-TLDR=$(echo "$SUMMARY" | head -5 | sed 's/\*//g' | head -3)
+# Extract TL;DR for the notification — strip markdown to clean plain text
+# 1. Remove heading lines  2. Strip bold/italic markers  3. Convert [text](url) to just text
+TLDR=$(echo "$SUMMARY" \
+  | sed '/^#/d; /^$/d' \
+  | head -5 \
+  | sed 's/\*\*//g; s/\*//g' \
+  | sed 's/\[\([^]]*\)\]([^)]*)/\1/g' \
+  | head -3)
 
-NOTIFY_MSG="📰 ${TITLE}
+# Escape HTML special chars in TLDR for Telegram parse_mode=HTML
+TLDR=$(echo "$TLDR" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+NOTIFY_MSG="📰 <b>${TITLE}</b>
 
 ${TLDR}
 
-🔗 ${PAGES_URL}"
+🔗 <a href=\"${PAGES_URL}\">Read full digest</a>"
 
 # Direct Telegram Bot API call — more reliable than openclaw message send
 curl -s --max-time 10 \
   -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
   --data-urlencode "chat_id=${TELEGRAM_OWNER_ID}" \
   --data-urlencode "text=${NOTIFY_MSG}" \
+  --data-urlencode "parse_mode=HTML" \
   --data-urlencode "disable_web_page_preview=true" \
   >/dev/null 2>&1 || log "WARN: Telegram notification failed"
 

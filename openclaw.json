@@ -14,10 +14,9 @@
     "defaults": {
       "workspace": "/data/workspace",
       "model": {
-        "primary": "openrouter/anthropic/claude-haiku-4-5",
+        "primary": "openrouter/deepseek/deepseek-chat",
         "fallbacks": [
-          "openrouter/deepseek/deepseek-chat",
-          "openrouter/google/gemini-2.0-flash-exp:free"
+          "openrouter/meta-llama/llama-3.3-70b-instruct:free"
         ]
       }
     }

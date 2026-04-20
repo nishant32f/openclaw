@@ -14,9 +14,9 @@
     "defaults": {
       "workspace": "/data/workspace",
       "model": {
-        "primary": "openrouter/google/gemma-4-31b-it:free",
+        "primary": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
         "fallbacks": [
-          "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
+          "openrouter/google/gemma-4-31b-it:free"
         ]
       }
     }

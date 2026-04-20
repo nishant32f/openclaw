@@ -1,12 +1,14 @@
 import {
-  getScopedCredentialValue,
+  createWebSearchProviderContractFields,
+  mergeScopedSearchConfig,
   resolveProviderWebSearchPluginConfig,
-  setProviderWebSearchPluginConfigValue,
-  setScopedCredentialValue,
   type WebSearchProviderPlugin,
-} from "openclaw/plugin-sdk/provider-web-search-contract";
+} from "openclaw/plugin-sdk/provider-web-search-config-contract";
+import { resolvePerplexityRuntimeTransport } from "./src/perplexity-web-search-provider.shared.js";
 
 export function createPerplexityWebSearchProvider(): WebSearchProviderPlugin {
+  const credentialPath = "plugins.entries.perplexity.config.webSearch.apiKey";
+
   return {
     id: "perplexity",
     label: "Perplexity Search",
@@ -18,16 +20,24 @@ export function createPerplexityWebSearchProvider(): WebSearchProviderPlugin {
     signupUrl: "https://www.perplexity.ai/settings/api",
     docsUrl: "https://docs.openclaw.ai/perplexity",
     autoDetectOrder: 50,
-    credentialPath: "plugins.entries.perplexity.config.webSearch.apiKey",
-    inactiveSecretPaths: ["plugins.entries.perplexity.config.webSearch.apiKey"],
-    getCredentialValue: (searchConfig) => getScopedCredentialValue(searchConfig, "perplexity"),
-    setCredentialValue: (searchConfigTarget, value) =>
-      setScopedCredentialValue(searchConfigTarget, "perplexity", value),
-    getConfiguredCredentialValue: (config) =>
-      resolveProviderWebSearchPluginConfig(config, "perplexity")?.apiKey,
-    setConfiguredCredentialValue: (configTarget, value) => {
-      setProviderWebSearchPluginConfigValue(configTarget, "perplexity", "apiKey", value);
-    },
+    credentialPath,
+    ...createWebSearchProviderContractFields({
+      credentialPath,
+      searchCredential: { type: "scoped", scopeId: "perplexity" },
+      configuredCredential: { pluginId: "perplexity" },
+    }),
+    resolveRuntimeMetadata: (ctx) => ({
+      perplexityTransport: resolvePerplexityRuntimeTransport({
+        searchConfig: mergeScopedSearchConfig(
+          ctx.searchConfig,
+          "perplexity",
+          resolveProviderWebSearchPluginConfig(ctx.config, "perplexity"),
+        ),
+        resolvedKey: ctx.resolvedCredential?.value,
+        keySource: ctx.resolvedCredential?.source ?? "missing",
+        fallbackEnvVar: ctx.resolvedCredential?.fallbackEnvVar,
+      }),
+    }),
     createTool: () => null,
   };
 }

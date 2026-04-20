@@ -1,12 +1,7 @@
-import { loadConfig } from "../config/config.js";
-import { info } from "../globals.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
-import {
-  cancelTaskById,
-  getTaskById,
-  updateTaskNotifyPolicyById,
-} from "../tasks/runtime-internal.js";
+import { getTaskById, updateTaskNotifyPolicyById } from "../tasks/runtime-internal.js";
+import { cancelDetachedTaskRunById } from "../tasks/task-executor.js";
 import {
   listTaskFlowAuditFindings,
   summarizeTaskFlowAuditFindings,
@@ -44,6 +39,13 @@ const STATUS_PAD = 10;
 const DELIVERY_PAD = 14;
 const ID_PAD = 10;
 const RUN_PAD = 10;
+
+const info = theme.info;
+
+async function loadTaskCancelConfig() {
+  const { loadConfig } = await import("../config/config.js");
+  return loadConfig();
+}
 
 function truncate(value: string, maxChars: number) {
   if (value.length <= maxChars) {
@@ -93,9 +95,9 @@ function formatTaskRows(tasks: TaskRecord[], rich: boolean) {
   const lines = [rich ? theme.heading(header) : header];
   for (const task of tasks) {
     const summary = truncate(
-      task.terminalSummary?.trim() ||
-        task.progressSummary?.trim() ||
-        task.label?.trim() ||
+      normalizeOptionalString(task.terminalSummary) ||
+        normalizeOptionalString(task.progressSummary) ||
+        normalizeOptionalString(task.label) ||
         task.task.trim(),
       80,
     );
@@ -105,7 +107,7 @@ function formatTaskRows(tasks: TaskRecord[], rich: boolean) {
       formatTaskStatusCell(task.status, rich),
       task.deliveryStatus.padEnd(DELIVERY_PAD),
       shortToken(task.runId, RUN_PAD).padEnd(RUN_PAD),
-      truncate(task.childSessionKey?.trim() || "n/a", 36).padEnd(36),
+      truncate(normalizeOptionalString(task.childSessionKey) || "n/a", 36).padEnd(36),
       summary,
     ].join(" ");
     lines.push(line.trimEnd());
@@ -386,8 +388,8 @@ export async function tasksCancelCommand(opts: { lookup: string }, runtime: Runt
     runtime.exit(1);
     return;
   }
-  const result = await cancelTaskById({
-    cfg: loadConfig(),
+  const result = await cancelDetachedTaskRunById({
+    cfg: await loadTaskCancelConfig(),
     taskId: task.taskId,
   });
   if (!result.found) {

@@ -160,7 +160,7 @@ Quick answers plus deeper troubleshooting for real-world setups (local dev, VPS,
     cd openclaw
     pnpm install
     pnpm build
-    pnpm ui:build # auto-installs UI deps on first run
+    pnpm ui:build
     openclaw onboard
     ```
 
@@ -767,7 +767,7 @@ for usage/billing and raise limits as needed.
   <Accordion title="Telegram: what goes in allowFrom?">
     `channels.telegram.allowFrom` is **the human sender's Telegram user ID** (numeric). It is not the bot username.
 
-    Onboarding accepts `@username` input and resolves it to a numeric ID, but OpenClaw authorization uses numeric IDs only.
+    Setup asks for numeric user IDs only. If you already have legacy `@username` entries in config, `openclaw doctor --fix` can try to resolve them.
 
     Safer (no third-party bot):
 
@@ -1258,7 +1258,7 @@ for usage/billing and raise limits as needed.
     openclaw browser --browser-profile chrome-live tabs
     ```
 
-    This path is host-local. If the Gateway runs elsewhere, either run a node host on the browser machine or use remote CDP instead.
+    This path can use the local host browser or a connected browser node. If the Gateway runs elsewhere, either run a node host on the browser machine or use remote CDP instead.
 
     Current limits on `existing-session` / `user`:
 
@@ -2254,7 +2254,7 @@ for usage/billing and raise limits as needed.
     Quickest setup:
 
     1. Install Ollama from `https://ollama.com/download`
-    2. Pull a local model such as `ollama pull glm-4.7-flash`
+    2. Pull a local model such as `ollama pull gemma4`
     3. If you want cloud models too, run `ollama signin`
     4. Run `openclaw onboard` and choose `Ollama`
     5. Pick `Local` or `Cloud + Local`
@@ -2728,8 +2728,8 @@ Related: [/concepts/oauth](/concepts/oauth) (OAuth flows, token storage, multi-a
 
   </Accordion>
 
-  <Accordion title='Why does openclaw gateway status say "Runtime: running" but "RPC probe: failed"?'>
-    Because "running" is the **supervisor's** view (launchd/systemd/schtasks). The RPC probe is the CLI actually connecting to the gateway WebSocket and calling `status`.
+  <Accordion title='Why does openclaw gateway status say "Runtime: running" but "Connectivity probe: failed"?'>
+    Because "running" is the **supervisor's** view (launchd/systemd/schtasks). The connectivity probe is the CLI actually connecting to the gateway WebSocket.
 
     Use `openclaw gateway status` and trust these lines:
 
@@ -3192,13 +3192,14 @@ Related: [/concepts/oauth](/concepts/oauth) (OAuth flows, token storage, multi-a
 
 <AccordionGroup>
   <Accordion title="How do I stop internal system messages from showing in chat?">
-    Most internal or tool messages only appear when **verbose** or **reasoning** is enabled
+    Most internal or tool messages only appear when **verbose**, **trace**, or **reasoning** is enabled
     for that session.
 
     Fix in the chat where you see it:
 
     ```
     /verbose off
+    /trace off
     /reasoning off
     ```
 

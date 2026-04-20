@@ -6,6 +6,8 @@ import type { OpenClawConfig, OpenClawPluginApi } from "openclaw/plugin-sdk/memo
 import {
   buildSessionEntry,
   listSessionFilesForAgent,
+  loadDreamingNarrativeTranscriptPathSetForAgent,
+  normalizeSessionTranscriptPathForComparison,
   parseUsageCountedSessionIdFromFileName,
   sessionPathForFile,
 } from "openclaw/plugin-sdk/memory-core-host-engine-qmd";
@@ -18,15 +20,9 @@ import {
   type MemoryLightDreamingConfig,
   type MemoryRemDreamingConfig,
 } from "openclaw/plugin-sdk/memory-core-host-status";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import { writeDailyDreamingPhaseBlock } from "./dreaming-markdown.js";
 import { generateAndAppendDreamNarrative, type NarrativePhaseData } from "./dreaming-narrative.js";
-import {
-  asRecord,
-  formatErrorMessage,
-  includesSystemEventToken,
-  normalizeTrimmedString,
-} from "./dreaming-shared.js";
+import { asRecord, formatErrorMessage, normalizeTrimmedString } from "./dreaming-shared.js";
 import {
   readShortTermRecallEntries,
   recordDreamingPhaseSignals,
@@ -35,6 +31,28 @@ import {
 } from "./short-term-promotion.js";
 
 type Logger = Pick<OpenClawPluginApi["logger"], "info" | "warn" | "error">;
+type DreamingPhaseStorageConfig = {
+  timezone?: string;
+  storage: { mode: "inline" | "separate" | "both"; separateReports: boolean };
+};
+type RunPhaseIfTriggeredParams = {
+  cleanedBody: string;
+  trigger?: string;
+  workspaceDir?: string;
+  cfg?: OpenClawConfig;
+  logger: Logger;
+  subagent?: Parameters<typeof generateAndAppendDreamNarrative>[0]["subagent"];
+  eventText: string;
+} & (
+  | {
+      phase: "light";
+      config: MemoryLightDreamingConfig & DreamingPhaseStorageConfig;
+    }
+  | {
+      phase: "rem";
+      config: MemoryRemDreamingConfig & DreamingPhaseStorageConfig;
+    }
+);
 const LIGHT_SLEEP_EVENT_TEXT = "__openclaw_memory_core_light_sleep__";
 const REM_SLEEP_EVENT_TEXT = "__openclaw_memory_core_rem_sleep__";
 const DAILY_MEMORY_FILENAME_RE = /^(\d{4}-\d{2}-\d{2})\.md$/;
@@ -672,13 +690,25 @@ async function collectSessionIngestionBatches(params: {
   const nextSeenMessages: Record<string, string[]> = { ...params.state.seenMessages };
   let changed = false;
 
-  const sessionFiles: Array<{ agentId: string; absolutePath: string; sessionPath: string }> = [];
+  const sessionFiles: Array<{
+    agentId: string;
+    absolutePath: string;
+    generatedByDreamingNarrative: boolean;
+    sessionPath: string;
+  }> = [];
   for (const agentId of agentIds) {
     const files = await listSessionFilesForAgent(agentId);
+    const dreamingTranscriptPaths =
+      files.length > 0
+        ? loadDreamingNarrativeTranscriptPathSetForAgent(agentId)
+        : new Set<string>();
     for (const absolutePath of files) {
       sessionFiles.push({
         agentId,
         absolutePath,
+        generatedByDreamingNarrative: dreamingTranscriptPaths.has(
+          normalizeSessionTranscriptPathForComparison(absolutePath),
+        ),
         sessionPath: sessionPathForFile(absolutePath),
       });
     }
@@ -723,10 +753,7 @@ async function collectSessionIngestionBatches(params: {
       mtimeMs: Math.floor(Math.max(0, stat.mtimeMs)),
       size: Math.floor(Math.max(0, stat.size)),
     };
-    const cursorAtEnd =
-      previous !== undefined &&
-      previous.lineCount > 0 &&
-      previous.lastContentLine >= previous.lineCount;
+    const cursorAtEnd = previous !== undefined && previous.lastContentLine >= previous.lineCount;
     const unchanged =
       Boolean(previous) &&
       previous.mtimeMs === fingerprint.mtimeMs &&
@@ -738,8 +765,30 @@ async function collectSessionIngestionBatches(params: {
       continue;
     }
 
-    const entry = await buildSessionEntry(file.absolutePath);
+    const entry = await buildSessionEntry(file.absolutePath, {
+      generatedByDreamingNarrative: file.generatedByDreamingNarrative,
+    });
     if (!entry) {
+      continue;
+    }
+    if (entry.generatedByDreamingNarrative) {
+      nextFiles[stateKey] = {
+        mtimeMs: fingerprint.mtimeMs,
+        size: fingerprint.size,
+        contentHash: entry.hash.trim(),
+        lineCount: entry.lineMap.length,
+        lastContentLine: entry.lineMap.length,
+      };
+      if (
+        !previous ||
+        previous.mtimeMs !== fingerprint.mtimeMs ||
+        previous.size !== fingerprint.size ||
+        previous.contentHash !== entry.hash.trim() ||
+        previous.lineCount !== entry.lineMap.length ||
+        previous.lastContentLine !== entry.lineMap.length
+      ) {
+        changed = true;
+      }
       continue;
     }
     const contentHash = entry.hash.trim();
@@ -921,6 +970,7 @@ async function ingestSessionTranscriptSignals(params: {
     timezone: params.timezone,
     state,
   });
+  const ingestionDayBucket = formatMemoryDreamingDay(params.nowMs, params.timezone);
   for (const batch of collected.batches) {
     await recordShortTermRecalls({
       workspaceDir: params.workspaceDir,
@@ -928,7 +978,7 @@ async function ingestSessionTranscriptSignals(params: {
       results: batch.results,
       signalType: "daily",
       dedupeByQueryPerDay: true,
-      dayBucket: batch.day,
+      dayBucket: ingestionDayBucket,
       nowMs: params.nowMs,
       timezone: params.timezone,
     });
@@ -1080,6 +1130,7 @@ async function ingestDailyMemorySignals(params: {
     nowMs: params.nowMs,
     state,
   });
+  const ingestionDayBucket = formatMemoryDreamingDay(params.nowMs, params.timezone);
   for (const batch of collected.batches) {
     await recordShortTermRecalls({
       workspaceDir: params.workspaceDir,
@@ -1087,7 +1138,7 @@ async function ingestDailyMemorySignals(params: {
       results: batch.results,
       signalType: "daily",
       dedupeByQueryPerDay: true,
-      dayBucket: batch.day,
+      dayBucket: ingestionDayBucket,
       nowMs: params.nowMs,
       timezone: params.timezone,
     });
@@ -1097,8 +1148,121 @@ async function ingestDailyMemorySignals(params: {
   }
 }
 
+export async function seedHistoricalDailyMemorySignals(params: {
+  workspaceDir: string;
+  filePaths: string[];
+  limit: number;
+  nowMs: number;
+  timezone?: string;
+}): Promise<{
+  importedFileCount: number;
+  importedSignalCount: number;
+  skippedPaths: string[];
+}> {
+  const normalizedPaths = [
+    ...new Set(params.filePaths.map((entry) => entry.trim()).filter(Boolean)),
+  ];
+  if (normalizedPaths.length === 0) {
+    return {
+      importedFileCount: 0,
+      importedSignalCount: 0,
+      skippedPaths: [],
+    };
+  }
+
+  const resolved = normalizedPaths
+    .map((filePath) => {
+      const fileName = path.basename(filePath);
+      const match = fileName.match(DAILY_MEMORY_FILENAME_RE);
+      if (!match) {
+        return { filePath, day: null as string | null };
+      }
+      return { filePath, day: match[1] ?? null };
+    })
+    .toSorted((a, b) => {
+      if (a.day && b.day) {
+        return b.day.localeCompare(a.day);
+      }
+      if (a.day) {
+        return -1;
+      }
+      if (b.day) {
+        return 1;
+      }
+      return a.filePath.localeCompare(b.filePath);
+    });
+
+  const valid = resolved.filter((entry): entry is { filePath: string; day: string } =>
+    Boolean(entry.day),
+  );
+  const skippedPaths = resolved.filter((entry) => !entry.day).map((entry) => entry.filePath);
+  const totalCap = Math.max(20, params.limit * 4);
+  const perFileCap = Math.max(6, Math.ceil(totalCap / Math.max(1, valid.length)));
+  let importedSignalCount = 0;
+  let importedFileCount = 0;
+
+  for (const entry of valid) {
+    if (importedSignalCount >= totalCap) {
+      break;
+    }
+    const raw = await fs.readFile(entry.filePath, "utf-8").catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        skippedPaths.push(entry.filePath);
+        return "";
+      }
+      throw err;
+    });
+    if (!raw) {
+      continue;
+    }
+    const lines = stripManagedDailyDreamingLines(raw.split(/\r?\n/));
+    const chunks = buildDailySnippetChunks(lines, perFileCap);
+    const results: MemorySearchResult[] = [];
+    for (const chunk of chunks) {
+      results.push({
+        path: `memory/${entry.day}.md`,
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        score: DAILY_INGESTION_SCORE,
+        snippet: chunk.snippet,
+        source: "memory",
+      });
+      if (results.length >= perFileCap || importedSignalCount + results.length >= totalCap) {
+        break;
+      }
+    }
+    if (results.length === 0) {
+      continue;
+    }
+    await recordShortTermRecalls({
+      workspaceDir: params.workspaceDir,
+      query: `__dreaming_daily__:${entry.day}`,
+      results,
+      signalType: "daily",
+      dedupeByQueryPerDay: true,
+      dayBucket: formatMemoryDreamingDay(params.nowMs, params.timezone),
+      nowMs: params.nowMs,
+      timezone: params.timezone,
+    });
+    importedSignalCount += results.length;
+    importedFileCount += 1;
+  }
+
+  return {
+    importedFileCount,
+    importedSignalCount,
+    skippedPaths,
+  };
+}
+
 function entryAverageScore(entry: ShortTermRecallEntry): number {
-  return entry.recallCount > 0 ? Math.max(0, Math.min(1, entry.totalScore / entry.recallCount)) : 0;
+  const signalCount = Math.max(
+    0,
+    Math.floor(entry.recallCount ?? 0) +
+      Math.floor(entry.dailyCount ?? 0) +
+      Math.floor(entry.groundedCount ?? 0),
+  );
+  return signalCount > 0 ? Math.max(0, Math.min(1, entry.totalScore / signalCount)) : 0;
 }
 
 function tokenizeSnippet(snippet: string): Set<string> {
@@ -1115,7 +1279,7 @@ function jaccardSimilarity(left: string, right: string): number {
   const leftTokens = tokenizeSnippet(left);
   const rightTokens = tokenizeSnippet(right);
   if (leftTokens.size === 0 || rightTokens.size === 0) {
-    return normalizeLowercaseStringOrEmpty(left) === normalizeLowercaseStringOrEmpty(right) ? 1 : 0;
+    return left.trim().toLowerCase() === right.trim().toLowerCase() ? 1 : 0;
   }
   let intersection = 0;
   for (const token of leftTokens) {
@@ -1508,29 +1672,11 @@ export async function runDreamingSweepPhases(params: {
   }
 }
 
-async function runPhaseIfTriggered(params: {
-  cleanedBody: string;
-  trigger?: string;
-  workspaceDir?: string;
-  cfg?: OpenClawConfig;
-  logger: Logger;
-  subagent?: Parameters<typeof generateAndAppendDreamNarrative>[0]["subagent"];
-  phase: "light" | "rem";
-  eventText: string;
-  config:
-    | (MemoryLightDreamingConfig & {
-        timezone?: string;
-        storage: { mode: "inline" | "separate" | "both"; separateReports: boolean };
-      })
-    | (MemoryRemDreamingConfig & {
-        timezone?: string;
-        storage: { mode: "inline" | "separate" | "both"; separateReports: boolean };
-      });
-}): Promise<{ handled: true; reason: string } | undefined> {
-  if (
-    params.trigger !== "heartbeat" ||
-    !includesSystemEventToken(params.cleanedBody, params.eventText)
-  ) {
+async function runPhaseIfTriggered(
+  params: RunPhaseIfTriggeredParams,
+): Promise<{ handled: true; reason: string } | undefined> {
+  const hasEventToken = params.cleanedBody.trim().split(/\s+/).includes(params.eventText);
+  if (params.trigger !== "heartbeat" || !hasEventToken) {
     return undefined;
   }
   if (!params.config.enabled) {
@@ -1556,10 +1702,7 @@ async function runPhaseIfTriggered(params: {
         await runLightDreaming({
           workspaceDir,
           cfg: params.cfg,
-          config: params.config as MemoryLightDreamingConfig & {
-            timezone?: string;
-            storage: { mode: "inline" | "separate" | "both"; separateReports: boolean };
-          },
+          config: params.config,
           logger: params.logger,
           subagent: params.subagent,
         });
@@ -1567,10 +1710,7 @@ async function runPhaseIfTriggered(params: {
         await runRemDreaming({
           workspaceDir,
           cfg: params.cfg,
-          config: params.config as MemoryRemDreamingConfig & {
-            timezone?: string;
-            storage: { mode: "inline" | "separate" | "both"; separateReports: boolean };
-          },
+          config: params.config,
           logger: params.logger,
           subagent: params.subagent,
         });

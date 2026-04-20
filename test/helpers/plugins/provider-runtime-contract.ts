@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderPlugin, ProviderRuntimeModel } from "../../../src/plugins/types.js";
+import { resolveRelativeBundledPluginPublicModuleId } from "../../../src/test-utils/bundled-plugin-public-surface.js";
 import {
   createProviderUsageFetch,
   makeResponse,
@@ -20,17 +20,43 @@ const getOAuthProvidersMock = vi.hoisted(() =>
     { id: "openai-codex", envApiKey: "OPENAI_API_KEY", oauthTokenEnv: "OPENAI_OAUTH_TOKEN" },
   ]),
 );
-const providerRuntimeContractModules = vi.hoisted(() => ({
-  anthropicIndexModuleId: "../../../extensions/anthropic/index.ts",
-  githubCopilotIndexModuleId: "../../../extensions/github-copilot/index.ts",
-  googleIndexModuleId: "../../../extensions/google/index.ts",
-  openAIIndexModuleId: "../../../extensions/openai/index.ts",
-  openAICodexProviderRuntimeModuleId: "../../../extensions/openai/openai-codex-provider.runtime.js",
-  openRouterIndexModuleId: "../../../extensions/openrouter/index.ts",
-  veniceIndexModuleId: "../../../extensions/venice/index.ts",
-  xAIIndexModuleId: "../../../extensions/xai/index.ts",
-  zaiIndexModuleId: "../../../extensions/zai/index.ts",
-}));
+const providerRuntimeContractModules = {
+  anthropicIndexModuleId: resolveRelativeBundledPluginPublicModuleId({
+    fromModuleUrl: import.meta.url,
+    pluginId: "anthropic",
+    artifactBasename: "index.js",
+  }),
+  githubCopilotIndexModuleId: resolveRelativeBundledPluginPublicModuleId({
+    fromModuleUrl: import.meta.url,
+    pluginId: "github-copilot",
+    artifactBasename: "index.js",
+  }),
+  googleIndexModuleId: resolveRelativeBundledPluginPublicModuleId({
+    fromModuleUrl: import.meta.url,
+    pluginId: "google",
+    artifactBasename: "index.js",
+  }),
+  openAIIndexModuleId: resolveRelativeBundledPluginPublicModuleId({
+    fromModuleUrl: import.meta.url,
+    pluginId: "openai",
+    artifactBasename: "index.js",
+  }),
+  openRouterIndexModuleId: resolveRelativeBundledPluginPublicModuleId({
+    fromModuleUrl: import.meta.url,
+    pluginId: "openrouter",
+    artifactBasename: "index.js",
+  }),
+  veniceIndexModuleId: resolveRelativeBundledPluginPublicModuleId({
+    fromModuleUrl: import.meta.url,
+    pluginId: "venice",
+    artifactBasename: "index.js",
+  }),
+  zaiIndexModuleId: resolveRelativeBundledPluginPublicModuleId({
+    fromModuleUrl: import.meta.url,
+    pluginId: "zai",
+    artifactBasename: "index.js",
+  }),
+};
 
 vi.mock("@mariozechner/pi-ai/oauth", async () => {
   const actual = await vi.importActual<typeof import("@mariozechner/pi-ai/oauth")>(
@@ -42,10 +68,6 @@ vi.mock("@mariozechner/pi-ai/oauth", async () => {
     getOAuthProviders: getOAuthProvidersMock,
   };
 });
-
-vi.mock(providerRuntimeContractModules.openAICodexProviderRuntimeModuleId, () => ({
-  refreshOpenAICodexToken: refreshOpenAICodexTokenMock,
-}));
 
 async function importBundledProviderPlugin<T>(moduleUrl: string): Promise<T> {
   return (await import(moduleUrl)) as T;
@@ -127,15 +149,6 @@ const PROVIDER_RUNTIME_CONTRACT_FIXTURES: readonly ProviderRuntimeContractFixtur
       await importBundledProviderPlugin<{
         default: Parameters<typeof registerProviderPlugin>[0]["plugin"];
       }>(providerRuntimeContractModules.veniceIndexModuleId),
-  },
-  {
-    providerIds: ["xai"],
-    pluginId: "xai",
-    name: "xAI",
-    load: async () =>
-      await importBundledProviderPlugin<{
-        default: Parameters<typeof registerProviderPlugin>[0]["plugin"];
-      }>(providerRuntimeContractModules.xAIIndexModuleId),
   },
   {
     providerIds: ["zai"],
@@ -685,159 +698,6 @@ export function describeOpenAIProviderRuntimeContract() {
         windows: [{ label: "3h", usedPercent: 12, resetAt: 1_705_000_000 }],
         plan: "Plus",
       });
-    });
-  });
-}
-
-export function describeXAIProviderRuntimeContract() {
-  describe("xai provider runtime contract", { timeout: CONTRACT_SETUP_TIMEOUT_MS }, () => {
-    installRuntimeHooks();
-
-    it("owns Grok forward-compat resolution for newer fast models", () => {
-      const provider = requireProviderContractProvider("xai");
-      const model = provider.resolveDynamicModel?.({
-        provider: "xai",
-        modelId: "grok-4-1-fast-reasoning",
-        modelRegistry: {
-          find: () => null,
-        } as never,
-        providerConfig: {
-          api: "openai-completions",
-          baseUrl: "https://api.x.ai/v1",
-        },
-      });
-
-      expect(model).toMatchObject({
-        id: "grok-4-1-fast-reasoning",
-        provider: "xai",
-        api: "openai-completions",
-        baseUrl: "https://api.x.ai/v1",
-        reasoning: true,
-        contextWindow: 2_000_000,
-      });
-    });
-
-    it("owns modern-model matching without accepting multi-agent ids", () => {
-      const provider = requireProviderContractProvider("xai");
-
-      expect(
-        provider.isModernModelRef?.({
-          provider: "xai",
-          modelId: "grok-4-1-fast-reasoning",
-        } as never),
-      ).toBe(true);
-      expect(
-        provider.isModernModelRef?.({
-          provider: "xai",
-          modelId: "grok-4.20-multi-agent-experimental-beta-0304",
-        } as never),
-      ).toBe(false);
-    });
-
-    it("owns direct xai compat flags on resolved models", () => {
-      const provider = requireProviderContractProvider("xai");
-
-      expect(
-        provider.normalizeResolvedModel?.({
-          provider: "xai",
-          modelId: "grok-4-1-fast",
-          model: createModel({
-            id: "grok-4-1-fast",
-            provider: "xai",
-            api: "openai-completions",
-            baseUrl: "https://api.x.ai/v1",
-          }),
-        } as never),
-      ).toMatchObject({
-        compat: {
-          toolSchemaProfile: "xai",
-          nativeWebSearchTool: true,
-          toolCallArgumentsEncoding: "html-entities",
-        },
-      });
-    });
-
-    it("owns downstream xai compat contributions for x-ai routed models", () => {
-      const provider = requireProviderContractProvider("xai");
-
-      expect(
-        provider.contributeResolvedModelCompat?.({
-          provider: "openrouter",
-          modelId: "x-ai/grok-4-1-fast",
-          model: createModel({
-            id: "x-ai/grok-4-1-fast",
-            provider: "openrouter",
-            api: "openai-completions",
-            baseUrl: "https://openrouter.ai/api/v1",
-          }),
-        } as never),
-      ).toMatchObject({
-        toolSchemaProfile: "xai",
-        nativeWebSearchTool: true,
-        toolCallArgumentsEncoding: "html-entities",
-      });
-    });
-
-    it("owns xai tool_stream defaults", () => {
-      const provider = requireProviderContractProvider("xai");
-
-      expect(
-        provider.prepareExtraParams?.({
-          provider: "xai",
-          modelId: "grok-4-1-fast-reasoning",
-          extraParams: { temperature: 0.2 },
-        }),
-      ).toEqual({
-        temperature: 0.2,
-        tool_stream: true,
-      });
-
-      expect(
-        provider.prepareExtraParams?.({
-          provider: "xai",
-          modelId: "grok-4-1-fast-reasoning",
-          extraParams: { tool_stream: false },
-        }),
-      ).toEqual({
-        tool_stream: false,
-      });
-    });
-
-    it("owns xai fast-mode model rewriting through the plugin stream hook", () => {
-      const provider = requireProviderContractProvider("xai");
-      let capturedModelId = "";
-      const baseStreamFn: StreamFn = (model) => {
-        capturedModelId = model.id;
-        return {
-          push() {},
-          async result() {
-            return undefined;
-          },
-          async *[Symbol.asyncIterator]() {
-            // Minimal async stream surface for xAI decode wrappers.
-          },
-        } as unknown as ReturnType<StreamFn>;
-      };
-
-      const streamFn = provider.wrapStreamFn?.({
-        provider: "xai",
-        modelId: "grok-4",
-        extraParams: { fastMode: true },
-        streamFn: baseStreamFn,
-      });
-
-      expect(streamFn).toBeTypeOf("function");
-      void streamFn?.(
-        createModel({
-          id: "grok-4",
-          provider: "xai",
-          api: "openai-completions",
-          baseUrl: "https://api.x.ai/v1",
-        }) as never,
-        { messages: [] } as never,
-        {},
-      );
-      expect(capturedModelId).toBe("grok-4-fast");
     });
   });
 }

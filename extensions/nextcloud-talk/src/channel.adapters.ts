@@ -5,7 +5,6 @@ import {
   createScopedDmSecurityResolver,
 } from "openclaw/plugin-sdk/channel-config-helpers";
 import { createPairingPrefixStripper } from "openclaw/plugin-sdk/channel-pairing";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import {
   listNextcloudTalkAccountIds,
   resolveDefaultNextcloudTalkAccountId,
@@ -13,6 +12,10 @@ import {
   type ResolvedNextcloudTalkAccount,
 } from "./accounts.js";
 import type { CoreConfig } from "./types.js";
+
+function normalizeLowercaseStringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
 
 export const nextcloudTalkConfigAdapter = createScopedChannelConfigAdapter<
   ResolvedNextcloudTalkAccount,
@@ -39,11 +42,7 @@ export const nextcloudTalkSecurityAdapter = {
     resolveAllowFrom: (account) => account.config.allowFrom,
     policyPathSuffix: "dmPolicy",
     normalizeEntry: (raw) =>
-      raw
-        .trim()
-        .replace(/^(nextcloud-talk|nc-talk|nc):/i, "")
-        .trim()
-        .toLowerCase(),
+      normalizeLowercaseStringOrEmpty(raw.trim().replace(/^(nextcloud-talk|nc-talk|nc):/i, "")),
   }),
 };
 

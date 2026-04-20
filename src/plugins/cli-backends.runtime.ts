@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import type { CliBackendPlugin } from "./types.js";
+import type { CliBackendPlugin } from "./cli-backend.types.js";
 
 export type PluginCliBackendEntry = CliBackendPlugin & {
   pluginId: string;
@@ -28,8 +28,7 @@ function loadPluginRuntime(): PluginRuntimeModule | null {
 }
 
 export function resolveRuntimeCliBackends(): PluginCliBackendEntry[] {
-  return (loadPluginRuntime()?.getActivePluginRegistry()?.cliBackends ?? []).map((entry) => ({
-    ...entry.backend,
-    pluginId: entry.pluginId,
-  }));
+  return (loadPluginRuntime()?.getActivePluginRegistry()?.cliBackends ?? []).map((entry) =>
+    Object.assign({}, entry.backend, { pluginId: entry.pluginId }),
+  );
 }

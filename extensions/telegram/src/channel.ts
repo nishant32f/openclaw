@@ -85,12 +85,19 @@ import { resolveTelegramToken } from "./token.js";
 import { parseTelegramTopicConversation } from "./topic-conversation.js";
 
 type TelegramSendFn = typeof import("./send.js").sendMessageTelegram;
+type TelegramUpdateOffsetRuntime = typeof import("../update-offset-runtime-api.js");
 
 let telegramSendModulePromise: Promise<typeof import("./send.js")> | undefined;
+let telegramUpdateOffsetRuntimePromise: Promise<TelegramUpdateOffsetRuntime> | undefined;
 
 async function loadTelegramSendModule() {
   telegramSendModulePromise ??= import("./send.js");
   return await telegramSendModulePromise;
+}
+
+async function loadTelegramUpdateOffsetRuntime() {
+  telegramUpdateOffsetRuntimePromise ??= import("../update-offset-runtime-api.js");
+  return await telegramUpdateOffsetRuntimePromise;
 }
 
 type TelegramSendOptions = NonNullable<Parameters<TelegramSendFn>[2]>;
@@ -276,13 +283,13 @@ function targetsMatchTelegramReplySuppression(params: {
   const origin = parseTelegramTarget(params.originTarget);
   const target = parseTelegramTarget(params.targetKey);
   const originThreadId =
-    origin.messageThreadId != null && String(origin.messageThreadId).trim()
-      ? String(origin.messageThreadId).trim()
+    origin.messageThreadId != null && normalizeOptionalString(String(origin.messageThreadId))
+      ? normalizeOptionalString(String(origin.messageThreadId))
       : undefined;
   const targetThreadId =
-    params.targetThreadId?.trim() ||
-    (target.messageThreadId != null && String(target.messageThreadId).trim()
-      ? String(target.messageThreadId).trim()
+    normalizeOptionalString(params.targetThreadId) ||
+    (target.messageThreadId != null && normalizeOptionalString(String(target.messageThreadId))
+      ? normalizeOptionalString(String(target.messageThreadId))
       : undefined);
   if (
     normalizeOptionalLowercaseString(origin.chatId) !==
@@ -304,8 +311,8 @@ function resolveTelegramCommandConversation(params: {
 }) {
   const chatId = [params.originatingTo, params.commandTo, params.fallbackTo]
     .map((candidate) => {
-      const trimmed = candidate?.trim();
-      return trimmed ? parseTelegramTarget(trimmed).chatId.trim() : "";
+      const trimmed = normalizeOptionalString(candidate) ?? "";
+      return trimmed ? (normalizeOptionalString(parseTelegramTarget(trimmed).chatId) ?? "") : "";
     })
     .find((candidate) => candidate.length > 0);
   if (!chatId) {
@@ -331,12 +338,13 @@ function resolveTelegramInboundConversation(params: {
   conversationId?: string;
   threadId?: string | number;
 }) {
-  const rawTarget = params.to?.trim() || params.conversationId?.trim() || "";
+  const rawTarget =
+    normalizeOptionalString(params.to) ?? normalizeOptionalString(params.conversationId) ?? "";
   if (!rawTarget) {
     return null;
   }
   const parsedTarget = parseTelegramTarget(rawTarget);
-  const chatId = parsedTarget.chatId.trim();
+  const chatId = normalizeOptionalString(parsedTarget.chatId) ?? "";
   if (!chatId) {
     return null;
   }
@@ -733,12 +741,12 @@ export const telegramPlugin = createChatChannelPlugin({
         const previousToken = resolveTelegramAccount({ cfg: prevCfg, accountId }).token.trim();
         const nextToken = resolveTelegramAccount({ cfg: nextCfg, accountId }).token.trim();
         if (previousToken !== nextToken) {
-          const { deleteTelegramUpdateOffset } = await import("../update-offset-runtime-api.js");
+          const { deleteTelegramUpdateOffset } = await loadTelegramUpdateOffsetRuntime();
           await deleteTelegramUpdateOffset({ accountId });
         }
       },
       onAccountRemoved: async ({ accountId }) => {
-        const { deleteTelegramUpdateOffset } = await import("../update-offset-runtime-api.js");
+        const { deleteTelegramUpdateOffset } = await loadTelegramUpdateOffsetRuntime();
         await deleteTelegramUpdateOffset({ accountId });
       },
     },
@@ -899,6 +907,7 @@ export const telegramPlugin = createChatChannelPlugin({
           accountId: account.accountId,
           config: ctx.cfg,
           runtime: ctx.runtime,
+          channelRuntime: ctx.channelRuntime,
           abortSignal: ctx.abortSignal,
           useWebhook: Boolean(account.config.webhookUrl),
           webhookUrl: account.config.webhookUrl,

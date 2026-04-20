@@ -1,8 +1,6 @@
 import { vi, type Mock } from "vitest";
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
-import { __testing as subagentRegistryTesting } from "./subagent-registry.js";
 import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
-import { __testing as subagentSpawnTesting } from "./subagent-spawn.js";
 
 type SessionsSpawnTestConfig = ReturnType<(typeof import("../config/config.js"))["loadConfig"]>;
 type SessionsSpawnHookRunner = SubagentLifecycleHookRunner | null;
@@ -11,6 +9,8 @@ type CaptureSubagentCompletionReply =
 type RunSubagentAnnounceFlow = (typeof import("./subagent-announce.js"))["runSubagentAnnounceFlow"];
 type CreateSessionsSpawnTool =
   (typeof import("./tools/sessions-spawn-tool.js"))["createSessionsSpawnTool"];
+type SubagentRegistryTesting = (typeof import("./subagent-registry.js"))["__testing"];
+type SubagentSpawnTesting = (typeof import("./subagent-spawn.js"))["__testing"];
 export type CreateOpenClawToolsOpts = Parameters<CreateSessionsSpawnTool>[0];
 export type GatewayRequest = { method?: string; params?: unknown };
 export type AgentWaitCall = { runId?: string; timeoutMs?: number };
@@ -26,6 +26,8 @@ type SessionsSpawnGatewayMockOptions = {
 
 const hoisted = vi.hoisted(() => {
   const callGatewayMock = vi.fn();
+  const sessionStore: Record<string, { sessionId: string; updatedAt: number }> = {};
+  let nextRunId = 0;
   const defaultConfigOverride = {
     session: {
       mainKey: "main",
@@ -88,10 +90,21 @@ const hoisted = vi.hoisted(() => {
     defaultRunSubagentAnnounceFlow,
     runSubagentAnnounceFlowOverride: defaultRunSubagentAnnounceFlow,
   };
-  return { callGatewayMock, defaultConfigOverride, state };
+  return {
+    callGatewayMock,
+    defaultConfigOverride,
+    nextRunId: () => {
+      nextRunId += 1;
+      return `run-${nextRunId}`;
+    },
+    sessionStore,
+    state,
+  };
 });
 
 let cachedCreateSessionsSpawnTool: CreateSessionsSpawnTool | null = null;
+let cachedSubagentRegistryTesting: SubagentRegistryTesting | null = null;
+let cachedSubagentSpawnTesting: SubagentSpawnTesting | null = null;
 
 export function getCallGatewayMock(): Mock {
   return hoisted.callGatewayMock;
@@ -134,15 +147,30 @@ export function setSessionsSpawnAnnounceFlowOverride(next: RunSubagentAnnounceFl
 }
 
 export async function getSessionsSpawnTool(opts: CreateOpenClawToolsOpts) {
-  subagentSpawnTesting.setDepsForTest({
+  if (!cachedSubagentSpawnTesting || !cachedSubagentRegistryTesting) {
+    const [{ __testing: subagentSpawnTesting }, { __testing: subagentRegistryTesting }] =
+      await Promise.all([import("./subagent-spawn.js"), import("./subagent-registry.js")]);
+    cachedSubagentSpawnTesting = subagentSpawnTesting;
+    cachedSubagentRegistryTesting = subagentRegistryTesting;
+  }
+  cachedSubagentSpawnTesting.setDepsForTest({
     callGateway: (optsUnknown) => hoisted.callGatewayMock(optsUnknown),
     getGlobalHookRunner: () => hoisted.state.hookRunnerOverride,
     loadConfig: () => hoisted.state.configOverride,
     updateSessionStore: async (_storePath, mutator) => mutator({}),
   });
-  subagentRegistryTesting.setDepsForTest({
+  cachedSubagentRegistryTesting.setDepsForTest({
     callGateway: (optsUnknown) => hoisted.callGatewayMock(optsUnknown),
     loadConfig: () => hoisted.state.configOverride,
+    cleanupBrowserSessionsForLifecycleEnd: async () => {},
+    ensureContextEnginesInitialized: () => {},
+    ensureRuntimePluginsLoaded: () => {},
+    resolveContextEngine: async () => ({
+      info: { id: "test", name: "Test" },
+      assemble: async ({ messages }) => ({ messages, estimatedTokens: 0 }),
+      compact: async () => ({ ok: true, compacted: false }),
+      ingest: async () => ({ ingested: false }),
+    }),
     captureSubagentCompletionReply: (sessionKey) =>
       hoisted.state.captureSubagentCompletionReplyOverride(sessionKey),
     runSubagentAnnounceFlow: (params) => hoisted.state.runSubagentAnnounceFlowOverride(params),
@@ -161,7 +189,6 @@ export function setupSessionsSpawnGatewayMock(setupOpts: SessionsSpawnGatewayMoc
 } {
   const calls: Array<GatewayRequest> = [];
   const waitCalls: Array<AgentWaitCall> = [];
-  let agentCallCount = 0;
   let childRunId: string | undefined;
   let childSessionKey: string | undefined;
 
@@ -182,19 +209,24 @@ export function setupSessionsSpawnGatewayMock(setupOpts: SessionsSpawnGatewayMoc
     }
 
     if (request.method === "agent") {
-      agentCallCount += 1;
-      const runId = `run-${agentCallCount}`;
+      const runId = hoisted.nextRunId();
       const params = request.params as { lane?: string; sessionKey?: string } | undefined;
       // Capture only the subagent run metadata.
       if (params?.lane === "subagent") {
         childRunId = runId;
         childSessionKey = params.sessionKey ?? "";
+        if (childSessionKey) {
+          hoisted.sessionStore[childSessionKey] = {
+            sessionId: `sess-${childSessionKey}`,
+            updatedAt: Date.now(),
+          };
+        }
         setupOpts.onAgentSubagentSpawn?.(params);
       }
       return {
         runId,
         status: "accepted",
-        acceptedAt: 1000 + agentCallCount,
+        acceptedAt: Date.now(),
       };
     }
 
@@ -251,21 +283,39 @@ vi.mock("../../gateway/call.js", () => ({
   callGateway: (opts: unknown) => hoisted.callGatewayMock(opts),
 }));
 
-vi.mock("../config/config.js", async () => {
-  const actual = await vi.importActual<typeof import("../config/config.js")>("../config/config.js");
-  return {
-    ...actual,
-    loadConfig: () => hoisted.state.configOverride,
-    resolveGatewayPort: () => 18789,
-  };
-});
+vi.mock("../config/config.js", () => ({
+  loadConfig: () => hoisted.state.configOverride,
+  resolveGatewayPort: () => 18789,
+}));
+
+vi.mock("../config/sessions.js", () => ({
+  loadSessionStore: () => hoisted.sessionStore,
+  mergeSessionEntry: (existing: object | undefined, patch: object) => ({
+    ...existing,
+    ...patch,
+  }),
+  resolveAgentMainSessionKey: (params: {
+    cfg?: { session?: { mainKey?: string } };
+    agentId: string;
+  }) => `agent:${params.agentId}:${params.cfg?.session?.mainKey ?? "main"}`,
+  resolveStorePath: () => "/tmp/openclaw-sessions-spawn-test-store.json",
+  updateSessionStore: async (
+    _storePath: string,
+    mutator: (store: typeof hoisted.sessionStore) => void | Promise<void>,
+  ) => {
+    await mutator(hoisted.sessionStore);
+  },
+}));
+
+vi.mock("../tasks/detached-task-runtime.js", () => ({
+  completeTaskRunByRunId: vi.fn(),
+  createRunningTaskRun: vi.fn(),
+  failTaskRunByRunId: vi.fn(),
+  setDetachedTaskDeliveryStatusByRunId: vi.fn(),
+}));
 
 // Same module, different specifier (used by tools under src/agents/tools/*).
-vi.mock("../../config/config.js", async () => {
-  const actual = await vi.importActual<typeof import("../config/config.js")>("../config/config.js");
-  return {
-    ...actual,
-    loadConfig: () => hoisted.state.configOverride,
-    resolveGatewayPort: () => 18789,
-  };
-});
+vi.mock("../../config/config.js", () => ({
+  loadConfig: () => hoisted.state.configOverride,
+  resolveGatewayPort: () => 18789,
+}));

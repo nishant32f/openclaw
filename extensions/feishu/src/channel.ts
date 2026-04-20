@@ -67,7 +67,7 @@ import { collectFeishuSecurityAuditFindings } from "./security-audit.js";
 import { resolveFeishuSessionConversation } from "./session-conversation.js";
 import { resolveFeishuOutboundSessionRoute } from "./session-route.js";
 import { feishuSetupAdapter } from "./setup-core.js";
-import { feishuSetupWizard } from "./setup-surface.js";
+import { feishuSetupWizard, runFeishuLogin } from "./setup-surface.js";
 import { looksLikeFeishuId, normalizeFeishuTarget } from "./targets.js";
 import type { FeishuConfig, FeishuProbeResult, ResolvedFeishuAccount } from "./types.js";
 
@@ -635,7 +635,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
             },
           }),
       },
-      auth: feishuApprovalAuth,
+      approvalCapability: feishuApprovalAuth,
       secrets: {
         secretTargetRegistryEntries,
         collectRuntimeConfigAssignments,
@@ -1058,7 +1058,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
             return jsonActionResult({ ok: true, reactions });
           }
 
-          throw new Error(`Unsupported Feishu action: "${String(ctx.action)}"`);
+          throw new Error(`Unsupported Feishu action: "${ctx.action}"`);
         },
       },
       bindings: {
@@ -1090,6 +1090,17 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
             commandTo,
             fallbackTo,
           }),
+      },
+      auth: {
+        login: async ({ cfg }) => {
+          const { createClackPrompter } = await import("openclaw/plugin-sdk/setup-runtime");
+          const { writeConfigFile } = await import("openclaw/plugin-sdk/config-runtime");
+          const prompter = createClackPrompter();
+          const nextCfg = await runFeishuLogin({ cfg, prompter });
+          if (nextCfg !== cfg) {
+            await writeConfigFile(nextCfg);
+          }
+        },
       },
       setup: feishuSetupAdapter,
       setupWizard: feishuSetupWizard,

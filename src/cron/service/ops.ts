@@ -5,7 +5,8 @@ import {
   completeTaskRunByRunId,
   createRunningTaskRun,
   failTaskRunByRunId,
-} from "../../tasks/task-executor.js";
+} from "../../tasks/detached-task-runtime.js";
+import { createCronExecutionId } from "../run-id.js";
 import type { CronJob, CronJobCreate, CronJobPatch } from "../types.js";
 import {
   applyJobPatch,
@@ -13,6 +14,7 @@ import {
   computeJobNextRunAtMs,
   createJob,
   findJobOrThrow,
+  hasScheduledNextRunAtMs,
   isJobEnabled,
   isJobDue,
   nextWakeAtMs,
@@ -236,7 +238,9 @@ export async function listPage(state: CronServiceState, opts?: CronListPageOptio
       if (!query) {
         return true;
       }
-      const haystack = [job.name, job.description ?? "", job.agentId ?? ""].join(" ").toLowerCase();
+      const haystack = normalizeLowercaseStringOrEmpty(
+        [job.name, job.description ?? "", job.agentId ?? ""].join(" "),
+      );
       return haystack.includes(query);
     });
     const sorted = sortJobs(filtered, sortBy, sortDir);
@@ -325,13 +329,8 @@ export async function update(state: CronServiceState, id: string, patch: CronJob
         job.state.nextRunAtMs = undefined;
         job.state.runningAtMs = undefined;
       }
-    } else if (isJobEnabled(job)) {
-      // Non-schedule edits should not mutate other jobs, but still repair a
-      // missing/corrupt nextRunAtMs for the updated job.
-      const nextRun = job.state.nextRunAtMs;
-      if (typeof nextRun !== "number" || !Number.isFinite(nextRun)) {
-        job.state.nextRunAtMs = computeJobNextRunAtMs(job, now);
-      }
+    } else if (isJobEnabled(job) && !hasScheduledNextRunAtMs(job.state.nextRunAtMs)) {
+      job.state.nextRunAtMs = computeJobNextRunAtMs(job, now);
     }
 
     await persist(state);
@@ -396,10 +395,6 @@ type ManualRunPreflightResult =
 
 let nextManualRunId = 1;
 
-function createCronTaskRunId(jobId: string, startedAt: number): string {
-  return `cron:${jobId}:${startedAt}`;
-}
-
 async function skipInvalidPersistedManualRun(params: {
   state: CronServiceState;
   job: CronJob;
@@ -447,7 +442,7 @@ function tryCreateManualTaskRun(params: {
   job: CronJob;
   startedAt: number;
 }): string | undefined {
-  const runId = createCronTaskRunId(params.job.id, params.startedAt);
+  const runId = createCronExecutionId(params.job.id, params.startedAt);
   try {
     createRunningTaskRun({
       runtime: "cron",

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { describeCodexNativeWebSearch } from "../agents/codex-native-web-search.shared.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../agents/workspace.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import {
@@ -22,7 +23,7 @@ import {
   resolveControlUiLinks,
 } from "../commands/onboard-helpers.js";
 import type { OnboardOptions } from "../commands/onboard-types.js";
-import type { OpenClawConfig } from "../config/config.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { describeGatewayServiceRestart, resolveGatewayService } from "../daemon/service.js";
 import { isSystemdUserServiceAvailable } from "../daemon/systemd.js";
 import { ensureControlUiAssetsBuilt } from "../infra/control-ui-assets.js";
@@ -47,6 +48,15 @@ type FinalizeOnboardingOptions = {
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
 };
+
+type OnboardSearchModule = typeof import("../commands/onboard-search.js");
+
+let onboardSearchModulePromise: Promise<OnboardSearchModule> | undefined;
+
+function loadOnboardSearchModule(): Promise<OnboardSearchModule> {
+  onboardSearchModulePromise ??= import("../commands/onboard-search.js");
+  return onboardSearchModulePromise;
+}
 
 export async function finalizeSetupWizard(
   options: FinalizeOnboardingOptions,
@@ -516,14 +526,12 @@ export async function finalizeSetupWizard(
     );
   }
 
-  const { describeCodexNativeWebSearch } = await import("../agents/codex-native-web-search.js");
   const codexNativeSummary = describeCodexNativeWebSearch(nextConfig);
   const webSearchProvider = nextConfig.tools?.web?.search?.provider;
   const webSearchEnabled = nextConfig.tools?.web?.search?.enabled;
   const configuredSearchProviders = listConfiguredWebSearchProviders({ config: nextConfig });
   if (webSearchProvider) {
-    const { resolveExistingKey, hasExistingKey, hasKeyInEnv } =
-      await import("../commands/onboard-search.js");
+    const { resolveExistingKey, hasExistingKey, hasKeyInEnv } = await loadOnboardSearchModule();
     const entry = configuredSearchProviders.find((e) => e.id === webSearchProvider);
     const label = entry?.label ?? webSearchProvider;
     const storedKey = entry ? resolveExistingKey(nextConfig, webSearchProvider) : undefined;
@@ -585,7 +593,7 @@ export async function finalizeSetupWizard(
   } else {
     // Legacy configs may have a working key (e.g. apiKey or BRAVE_API_KEY) without
     // an explicit provider. Runtime auto-detects these, so avoid saying "skipped".
-    const { hasExistingKey, hasKeyInEnv } = await import("../commands/onboard-search.js");
+    const { hasExistingKey, hasKeyInEnv } = await loadOnboardSearchModule();
     const legacyDetected = configuredSearchProviders.find(
       (e) => hasExistingKey(nextConfig, e.id) || hasKeyInEnv(e),
     );

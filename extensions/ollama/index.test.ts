@@ -4,6 +4,7 @@ import plugin from "./index.js";
 
 const promptAndConfigureOllamaMock = vi.hoisted(() =>
   vi.fn(async () => ({
+    credential: "ollama-local",
     config: {
       models: {
         providers: {
@@ -81,9 +82,11 @@ describe("ollama plugin", () => {
 
     expect(promptAndConfigureOllamaMock).toHaveBeenCalledWith({
       cfg: {},
+      env: undefined,
+      opts: undefined,
       prompter: {},
-      isRemote: false,
-      openUrl: expect.any(Function),
+      secretInputMode: undefined,
+      allowSecretRefPrompt: undefined,
     });
     expect(result.configPatch).toEqual({
       models: {
@@ -115,13 +118,13 @@ describe("ollama plugin", () => {
 
     await provider.onModelSelected?.({
       config,
-      model: "ollama/glm-4.7-flash",
+      model: "ollama/gemma4",
       prompter,
     });
 
     expect(ensureOllamaModelPulledMock).toHaveBeenCalledWith({
       config,
-      model: "ollama/glm-4.7-flash",
+      model: "ollama/gemma4",
       prompter,
     });
   });
@@ -298,6 +301,35 @@ describe("ollama plugin", () => {
     expect((payloadSeen?.options as Record<string, unknown> | undefined)?.num_ctx).toBe(202752);
   });
 
+  it("declares streaming usage support for OpenAI-compatible Ollama routes", () => {
+    const provider = registerProvider();
+
+    expect(
+      provider.contributeResolvedModelCompat?.({
+        modelId: "qwen3:32b",
+        provider: "ollama",
+        model: {
+          api: "openai-completions",
+          provider: "ollama",
+          id: "qwen3:32b",
+          baseUrl: "http://127.0.0.1:11434/v1",
+        },
+      } as never),
+    ).toEqual({ supportsUsageInStreaming: true });
+    expect(
+      provider.contributeResolvedModelCompat?.({
+        modelId: "qwen3:32b",
+        provider: "custom",
+        model: {
+          api: "openai-completions",
+          provider: "custom",
+          id: "qwen3:32b",
+          baseUrl: "https://proxy.example.com/v1",
+        },
+      } as never),
+    ).toBeUndefined();
+  });
+
   it("owns replay policy for OpenAI-compatible Ollama routes only", () => {
     const provider = registerProvider();
 
@@ -444,5 +476,112 @@ describe("ollama plugin", () => {
     expect(baseStreamFn).toHaveBeenCalledTimes(1);
     expect(payloadSeen?.think).toBe(false);
     expect((payloadSeen?.options as Record<string, unknown> | undefined)?.think).toBeUndefined();
+  });
+
+  it("wraps native Ollama payloads with top-level think=true when thinking is enabled", () => {
+    const provider = registerProvider();
+    let payloadSeen: Record<string, unknown> | undefined;
+    const baseStreamFn = vi.fn((_model, _context, options) => {
+      const payload: Record<string, unknown> = {
+        messages: [],
+        options: { num_ctx: 65536 },
+        stream: true,
+      };
+      options?.onPayload?.(payload, _model);
+      payloadSeen = payload;
+      return {} as never;
+    });
+
+    const wrapped = provider.wrapStreamFn?.({
+      config: {
+        models: {
+          providers: {
+            ollama: {
+              api: "ollama",
+              baseUrl: "http://127.0.0.1:11434",
+              models: [],
+            },
+          },
+        },
+      },
+      provider: "ollama",
+      modelId: "qwen3.5:9b",
+      thinkingLevel: "low",
+      model: {
+        api: "ollama",
+        provider: "ollama",
+        id: "qwen3.5:9b",
+        baseUrl: "http://127.0.0.1:11434",
+        contextWindow: 131_072,
+      },
+      streamFn: baseStreamFn,
+    });
+
+    expect(typeof wrapped).toBe("function");
+    void wrapped?.(
+      {
+        api: "ollama",
+        provider: "ollama",
+        id: "qwen3.5:9b",
+      } as never,
+      {} as never,
+      {},
+    );
+    expect(baseStreamFn).toHaveBeenCalledTimes(1);
+    expect(payloadSeen?.think).toBe(true);
+    expect((payloadSeen?.options as Record<string, unknown> | undefined)?.think).toBeUndefined();
+  });
+
+  it("does not set think param when thinkingLevel is undefined", () => {
+    const provider = registerProvider();
+    let payloadSeen: Record<string, unknown> | undefined;
+    const baseStreamFn = vi.fn((_model, _context, options) => {
+      const payload: Record<string, unknown> = {
+        messages: [],
+        options: { num_ctx: 65536 },
+        stream: true,
+      };
+      options?.onPayload?.(payload, _model);
+      payloadSeen = payload;
+      return {} as never;
+    });
+
+    const wrapped = provider.wrapStreamFn?.({
+      config: {
+        models: {
+          providers: {
+            ollama: {
+              api: "ollama",
+              baseUrl: "http://127.0.0.1:11434",
+              models: [],
+            },
+          },
+        },
+      },
+      provider: "ollama",
+      modelId: "qwen3.5:9b",
+      thinkingLevel: undefined,
+      model: {
+        api: "ollama",
+        provider: "ollama",
+        id: "qwen3.5:9b",
+        baseUrl: "http://127.0.0.1:11434",
+        contextWindow: 131_072,
+      },
+      streamFn: baseStreamFn,
+    });
+
+    expect(typeof wrapped).toBe("function");
+    void wrapped?.(
+      {
+        api: "ollama",
+        provider: "ollama",
+        id: "qwen3.5:9b",
+      } as never,
+      {} as never,
+      {},
+    );
+    expect(baseStreamFn).toHaveBeenCalledTimes(1);
+    expect(payloadSeen?.think).toBeUndefined();
   });
 });

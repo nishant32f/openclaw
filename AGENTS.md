@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 - Repo: https://github.com/openclaw/openclaw
-- In chat replies, file references must be repo-root relative only (example: `src/telegram/index.ts:80`); never absolute paths or `~/...`.
+- In chat replies, file references must be repo-root relative only (example: `extensions/telegram/src/index.ts:80`); never absolute paths or `~/...`.
 - Do not edit files covered by security-focused `CODEOWNERS` rules unless a listed owner explicitly asked for the change or is already reviewing it with you. Treat those paths as restricted surfaces, not drive-by cleanup.
 
 ## Auto-close labels (issues and PRs)
@@ -36,7 +36,7 @@
 
 ## Project Structure & Module Organization
 
-- Source code: `src/` (CLI wiring in `src/cli`, commands in `src/commands`, web provider in `src/provider-web.ts`, infra in `src/infra`, media pipeline in `src/media`).
+- Source code: `src/` (CLI wiring in `src/cli`, commands in `src/commands`, infra in `src/infra`, media pipeline in `src/media`, web provider helpers in `src/web` and `src/plugins/web-*provider*.ts`).
 - Tests: colocated `*.test.ts`.
 - Docs: `docs/` (images, queue, Pi config). Built output lives in `dist/`.
 - Nomenclature: use "plugin" / "plugins" in docs, UI, changelogs, and contributor guidance. The bundled workspace plugin tree remains the internal package layout to avoid repo-wide churn from a rename.
@@ -46,8 +46,8 @@
 - Installers served from `https://openclaw.ai/*`: live in the sibling repo `../openclaw.ai` (`public/install.sh`, `public/install-cli.sh`, `public/install.ps1`).
 - Messaging channels: always consider **all** built-in + extension channels when refactoring shared logic (routing, allowlists, pairing, command gating, onboarding, docs).
   - Core channel docs: `docs/channels/`
-  - Core channel code: `src/telegram`, `src/discord`, `src/slack`, `src/signal`, `src/imessage`, `src/web` (WhatsApp web), `src/channels`, `src/routing`
-  - Bundled plugin channels: the workspace plugin tree (for example Matrix, Zalo, ZaloUser, Voice Call)
+  - Core channel code: `src/channels`, `src/routing`, `src/web`
+  - Bundled plugin channels: `extensions/<channel>/` (for example Discord, Telegram, Slack, Matrix, Zalo, ZaloUser, Voice Call)
 - When adding channels/plugins/apps/docs, update `.github/labeler.yml` and create matching GitHub labels (use existing channel/plugin label colors).
 
 ## Architecture Boundaries
@@ -59,11 +59,16 @@
   - `src/plugins/*` = plugin discovery, manifest validation, loader, registry, and contract enforcement
   - `src/gateway/protocol/*` = typed Gateway control-plane and node wire protocol
 - Progressive disclosure lives in local boundary guides:
-  - bundled-plugin-tree `AGENTS.md`
+  - repo root `AGENTS.md`
+  - bundled-plugin-tree `extensions/AGENTS.md`
   - `src/plugin-sdk/AGENTS.md`
   - `src/channels/AGENTS.md`
   - `src/plugins/AGENTS.md`
   - `src/gateway/protocol/AGENTS.md`
+- Workflow hygiene:
+  - Do not grep or existence-check every `docs/*.md`, `AGENTS.md`, or guide path mentioned in this file before starting work.
+  - Read only the guides and docs that are directly relevant to the files or boundary you are touching.
+  - Only do full broken-link or missing-guide sweeps when the task is explicitly about docs or repo-instruction maintenance.
 - Plugin and extension boundary:
   - Public docs: `docs/plugins/building-plugins.md`, `docs/plugins/architecture.md`, `docs/plugins/sdk-overview.md`, `docs/plugins/sdk-entrypoints.md`, `docs/plugins/sdk-runtime.md`, `docs/plugins/manifest.md`, `docs/plugins/sdk-channel-plugins.md`, `docs/plugins/sdk-provider-plugins.md`
   - Definition files: `src/plugin-sdk/plugin-entry.ts`, `src/plugin-sdk/core.ts`, `src/plugin-sdk/provider-entry.ts`, `src/plugin-sdk/channel-contract.ts`, `scripts/lib/plugin-sdk-entrypoints.json`, `package.json`
@@ -86,11 +91,35 @@
   - Rule: protocol changes are contract changes. Prefer additive evolution; incompatible changes require explicit versioning, docs, and client/codegen follow-through.
 - Bundled plugin contract boundary:
   - Public docs: `docs/plugins/architecture.md`, `docs/plugins/manifest.md`, `docs/plugins/sdk-overview.md`
-- Definition files: `src/plugins/contracts/registry.ts`, `src/plugins/types.ts`, `src/plugins/public-artifacts.ts`
+  - Definition files: `src/plugins/contracts/registry.ts`, `src/plugins/types.ts`, `src/plugins/public-surface-loader.ts`, `src/plugins/public-surface-runtime.ts`, `src/plugins/provider-public-artifacts.ts`, `src/plugins/web-provider-public-artifacts.ts`
   - Rule: keep manifest metadata, runtime registration, public SDK exports, and contract tests aligned. Do not create a hidden path around the declared plugin interfaces.
 - Extension test boundary:
   - Keep extension-owned onboarding/config/provider coverage under the owning bundled plugin package when feasible.
   - If core tests need bundled plugin behavior, consume it through public `src/plugin-sdk/<id>.ts` facades or the plugin's `api.ts`, not private extension modules.
+  - Shared helpers under `test/helpers/**` are part of that same boundary. Do not hardcode repo-relative `extensions/**` imports there, and do not keep plugin-local deep mocks in shared helpers just because multiple tests use them.
+  - When core tests or shared helpers need bundled plugin public surfaces, use `src/test-utils/bundled-plugin-public-surface.ts` for `api.ts`, `runtime-api.ts`, `contract-api.ts`, `test-api.ts`, plugin entrypoint `index.js`, and resolved module ids for dynamic import or mocking.
+  - If a core test is asserting extension-specific behavior instead of a generic contract, move it to the owning extension package.
+- Scoped guides still matter:
+  - `extensions/AGENTS.md` expands extension/plugin boundary rules.
+  - `src/channels/AGENTS.md` expands core channel boundary and hot-path rules.
+  - `src/plugin-sdk/AGENTS.md` expands public SDK contract rules.
+  - `src/plugins/AGENTS.md` expands plugin loading, registry, and manifest rules.
+  - `src/gateway/protocol/AGENTS.md` expands typed Gateway protocol rules.
+  - `src/gateway/AGENTS.md` expands Gateway server hot-path and plugin artifact rules.
+  - `src/agents/AGENTS.md` expands agent test/import performance rules.
+  - `test/helpers/AGENTS.md` and `test/helpers/channels/AGENTS.md` expand shared test helper boundary rules.
+- Plugin architecture direction:
+  - Keep a manifest-first control plane: discovery, validation, enablement, setup hints, and activation planning should stay metadata-driven by default.
+  - Keep runtime execution separate: actual provider/channel/tool execution should resolve through narrow targeted loaders, not broad registry materialization.
+  - Host loads plugins; plugins do not load host internals. Prefer a small versioned host/kernel seam plus documented SDK entrypoints over ambient reachability.
+  - Treat broad runtime registries and mutable global plugin state as transitional compatibility surfaces, not the target architecture.
+  - If a setup or config flow truly needs plugin runtime, make that explicit instead of silently importing runtime code on the cold path.
+
+## Scoped Workflow Guides
+
+- `docs/AGENTS.md` owns Mintlify docs, docs links, and docs i18n rules.
+- `ui/AGENTS.md` owns Control UI i18n and generated locale rules.
+- `scripts/AGENTS.md` owns script-runner, local-check lock, and test/lint wrapper rules.
 
 ## Docs Linking (Mintlify)
 
@@ -198,19 +227,28 @@
 - Runtime baseline: Node **22+** (keep Node + Bun paths working).
 - Install deps: `pnpm install`
 - If deps are missing (for example `node_modules` missing, `vitest not found`, or `command not found`), run the repo’s package-manager install command (prefer lockfile/README-defined PM), then rerun the exact requested command once. Apply this to test/build/lint/typecheck/dev commands; if retry still fails, report the command and first actionable error.
-- Pre-commit hooks: `prek install`. The hook runs the repo verification flow, including `pnpm check`.
-- `FAST_COMMIT=1` skips the repo-wide `pnpm format` and `pnpm check` inside the pre-commit hook only. Use it when you intentionally want a faster commit path and are running equivalent targeted verification manually. It does not change CI and does not change what `pnpm check` itself does.
+- Pre-commit hooks are installed by the package `prepare` script (`git config core.hooksPath git-hooks`). The hook formats/lints staged source files and runs `pnpm check` unless the staged change is docs-only or `FAST_COMMIT=1` is set.
+- `FAST_COMMIT=1` skips the repo-wide `pnpm check` inside the pre-commit hook only. The hook still runs targeted formatting/linting for staged files and restages formatter changes. Use it when you intentionally want a faster commit path and are running equivalent targeted verification manually. It does not change CI and does not change what `pnpm check` itself does.
 - Also supported: `bun install` (keep `pnpm-lock.yaml` + Bun patching in sync when touching deps/patches).
 - Prefer Bun for TypeScript execution (scripts, dev, tests): `bun <file.ts>` / `bunx <tool>`.
 - Run CLI in dev: `pnpm openclaw ...` (bun) or `pnpm dev`.
 - Node remains supported for running built output (`dist/*`) and production installs.
 - Mac packaging (dev): `scripts/package-mac-app.sh` defaults to current arch.
 - Type-check/build: `pnpm build`
-- TypeScript checks: `pnpm tsgo`
+- TypeScript checks are split by architecture boundary, with four normal lanes:
+  - `pnpm tsgo` / `pnpm tsgo:core`: core production roots (`src/`, `ui/`, `packages/`; no `extensions/` include roots).
+  - `pnpm tsgo:core:test`: core colocated tests.
+  - `pnpm tsgo:extensions`: bundled extension production graph.
+  - `pnpm tsgo:extensions:test`: bundled extension colocated tests.
+  - `pnpm tsgo:all`: every TypeScript graph above; this is what `pnpm check` runs.
+  - `pnpm tsgo:profile [core-test|extensions-test|--all]`: profile fresh graph cost into `.artifacts/tsgo-profile/`. Diagnostic-only profile slices (`core-test-agents`, `core-test-non-agents`) exist for investigating agent graph cost; do not treat them as normal user-facing checks.
+  - Narrow aliases remain for local loops: `pnpm tsgo:test:src`, `pnpm tsgo:test:ui`, `pnpm tsgo:test:packages`.
+- Do not add `tsc --noEmit`, `typecheck`, or `check:types` lanes for repo type checking. Use `tsgo` graphs. `tsc` is allowed only when emitting declaration/package-boundary compatibility artifacts that `tsgo` does not replace.
+- Boundary rule: core must not know extension implementation details. Extensions hook into core through manifests, registries, capabilities, and public `openclaw/plugin-sdk/*` contracts. If you find core production code naming a specific extension, or a core test that is really testing extension-owned behavior, call it out and prefer moving coverage/logic to the owning extension or a generic contract test.
 - Lint/format: `pnpm check`
-- Local agent/dev shells default to lower-memory `OPENCLAW_LOCAL_CHECK=1` behavior for `pnpm tsgo` and `pnpm lint`; set `OPENCLAW_LOCAL_CHECK=0` in CI/shared runs.
-- Format check: `pnpm format` (oxfmt --check)
-- Format fix: `pnpm format:fix` (oxfmt --write)
+- Local agent/dev shells default to host-aware `OPENCLAW_LOCAL_CHECK=1` behavior for `pnpm tsgo` and `pnpm lint`; set `OPENCLAW_LOCAL_CHECK_MODE=throttled` to force the lower-memory profile, `OPENCLAW_LOCAL_CHECK_MODE=full` to keep lock-only behavior, or `OPENCLAW_LOCAL_CHECK=0` in CI/shared runs.
+- Format check: `pnpm format:check` (oxfmt --check)
+- Format fix: `pnpm format` or `pnpm format:fix` (oxfmt --write)
 - Terminology:
   - "gate" means a verification command or command set that must be green for the decision you are making.
   - A local dev gate is the fast default loop, usually `pnpm check` plus any scoped test you actually need.
@@ -218,13 +256,14 @@
   - A CI gate is whatever the relevant workflow enforces for that lane (for example `check`, `check-additional`, `build-smoke`, or release validation).
 - Local dev gate: prefer `pnpm check` for the normal edit loop. It keeps the repo-architecture policy guards out of the default local loop.
 - CI architecture gate: `check-additional` enforces architecture and boundary policy guards that are intentionally kept out of the default local loop.
-- Formatting gate: the pre-commit hook runs `pnpm format` before `pnpm check`. If you want a formatting-only preflight locally, run `pnpm format` explicitly.
-- If you need a fast commit loop, `FAST_COMMIT=1 git commit ...` skips the hook’s repo-wide `pnpm format` and `pnpm check`; use that only when you are deliberately covering the touched surface some other way.
+- Formatting gate: the pre-commit hook runs targeted formatting on staged source files before `pnpm check`. If you want a repo-wide formatting-only preflight locally, run `pnpm format:check` explicitly.
+- If you need a fast commit loop, `FAST_COMMIT=1 git commit ...` skips the hook’s repo-wide `pnpm check`; targeted formatting/linting still runs, so use that only when you are deliberately covering the touched surface some other way.
 - Tests: `pnpm test` (vitest); coverage: `pnpm test:coverage`
 - Generated baseline artifacts live together under `docs/.generated/`.
 - Config schema drift uses `pnpm config:docs:gen` / `pnpm config:docs:check`.
 - Plugin SDK API drift uses `pnpm plugin-sdk:api:gen` / `pnpm plugin-sdk:api:check`.
-- If you change config schema/help or the public Plugin SDK surface, update the matching baseline artifact and keep the two drift-check flows adjacent in scripts/workflows/docs guidance rather than inventing a third pattern.
+- If you change config schema/help or the public Plugin SDK surface, run the matching gen command and commit the updated `.sha256` hash file. Keep the two drift-check flows adjacent in scripts/workflows/docs guidance rather than inventing a third pattern.
+- When a `tsgo` graph fails, triage by coherent surface instead of by raw error count: rerun the failing graph, group failures by package/module/type contract, open the source-of-truth type or export file first, fix the root mismatch, then rerun the failing graph before widening into downstream consumers. Check `origin/main` before doing broad cleanup because some apparent type debt is already fixed upstream.
 - For narrowly scoped changes, prefer narrowly scoped tests that directly validate the touched behavior. If no meaningful scoped test exists, say so explicitly and use the next most direct validation available.
 - Verification modes for work on `main`:
   - Default mode: `main` is relatively stable. Count pre-commit hook coverage when it already verified the current tree, avoid rerunning the exact same checks just for ceremony, and prefer keeping CI/main green before landing.
@@ -251,6 +290,7 @@
 - New runtime control-flow code should not branch on `error: string` or `reason: string` when a closed code union would be reasonable.
 - Dynamic import guardrail: do not mix `await import("x")` and static `import ... from "x"` for the same module in production code paths. If you need lazy loading, create a dedicated `*.runtime.ts` boundary (that re-exports from `x`) and dynamically import that boundary from lazy callers only.
 - Dynamic import verification: after refactors that touch lazy-loading/module boundaries, run `pnpm build` and check for `[INEFFECTIVE_DYNAMIC_IMPORT]` warnings before submitting.
+- Circular dependencies: keep both `pnpm check:import-cycles` and `pnpm check:madge-import-cycles` green; do not reintroduce runtime import cycles or madge-detected import loops.
 - Extension SDK self-import guardrail: inside an extension package, do not import that same extension via `openclaw/plugin-sdk/<extension>` from production files. Route internal imports through a local barrel such as `./api.ts` or `./runtime-api.ts`, and keep the `plugin-sdk/<extension>` path as the external contract only.
 - Extension package boundary guardrail: inside a bundled plugin package, do not use relative imports/exports that resolve outside that same package root. If shared code belongs in the plugin SDK, import `openclaw/plugin-sdk/<subpath>` instead of reaching into `src/plugin-sdk/**` or other repo paths via `../`.
 - Extension API surface rule: `openclaw/plugin-sdk/<subpath>` is the only public cross-package contract for extension-facing SDK code. If an extension needs a new seam, add a public subpath first; do not reach into `src/plugin-sdk/**` by relative path.
@@ -287,6 +327,8 @@
 - Test performance guardrail: when production code already accepts `deps`, callbacks, or runtime injection, use that seam in tests before adding module-level mocks.
 - Test performance guardrail: prefer narrow public SDK subpaths such as `models-provider-runtime`, `skill-commands-runtime`, and `reply-dispatch-runtime` over older broad helper barrels when both expose the needed helper.
 - Test performance guardrail: treat import-dominated test time as a boundary bug. Refactor the import surface before adding more cases to the slow file.
+- Test performance guardrail: when replacing a slow integration test with helper-level coverage, extract the exact production composition into a named helper and test that helper. Do not trade coverage shape for speed without preserving the behavior proof somewhere cheaper.
+- Test performance guardrail: for plugin-owned static descriptors used by core tests or cold paths, prefer lightweight public artifacts with full-runtime fallback over loading broad bundled plugin barrels.
 - Agents MUST NOT modify baseline, inventory, ignore, snapshot, or expected-failure files to silence failing checks without explicit approval in this chat.
 - For targeted/local debugging, keep using the wrapper: `pnpm test -- <path-or-filter> [vitest args...]` (for example `pnpm test -- src/commands/onboard-search.test.ts -t "shows registered plugin providers"`); do not default to raw `pnpm vitest run ...` because it bypasses wrapper config/profile/pool routing.
 - Do not set test workers above 16; tried already.
@@ -332,8 +374,8 @@
 
 ## Security & Configuration Tips
 
-- Web provider stores creds at `~/.openclaw/credentials/`; rerun `openclaw login` if logged out.
-- Pi sessions live under `~/.openclaw/sessions/` by default; the base directory is not configurable.
+- Channel/provider state lives under `~/.openclaw/credentials/`; rerun `openclaw channels login` if logged out. Model auth profiles live under `~/.openclaw/agents/<agentId>/agent/auth-profiles.json`; legacy OAuth import still reads `~/.openclaw/credentials/oauth.json`.
+- Pi sessions live under `~/.openclaw/agents/<agentId>/sessions/` by default; `session.store` can override the session store path.
 - Environment variables: see `~/.profile`.
 - Never commit or publish real phone numbers, videos, or live configuration values. Use obviously fake placeholders in docs, tests, and examples.
 - Release flow: use the private [maintainer release docs](https://github.com/openclaw/maintainers/blob/main/release/README.md) for the actual runbook; use `docs/reference/RELEASING.md` for the public release policy.
@@ -371,13 +413,13 @@
 - Patching dependencies (pnpm patches, overrides, or vendored changes) requires explicit approval; do not do this by default.
 - CLI progress: use `src/cli/progress.ts` (`osc-progress` + `@clack/prompts` spinner); don’t hand-roll spinners/bars.
 - Status output: keep tables + ANSI-safe wrapping (`src/terminal/table.ts`); `status --all` = read-only/pasteable, `status --deep` = probes.
-- Gateway currently runs only as the menubar app; there is no separate LaunchAgent/helper label installed. Restart via the OpenClaw Mac app or `scripts/restart-mac.sh`; to verify/kill use `launchctl print gui/$UID | grep openclaw` rather than assuming a fixed label. **When debugging on macOS, start/stop the gateway via the app, not ad-hoc tmux sessions; kill any temporary tunnels before handoff.**
+- Gateway may run as an app-managed launchd job. Restart the gateway via the app or `openclaw gateway restart`; inspect with `openclaw gateway status --deep` or, for the default profile, `launchctl print gui/$UID/ai.openclaw.gateway`. Use `scripts/restart-mac.sh` when you need to rebuild/relaunch the local macOS app itself. The app LaunchAgent uses `ai.openclaw.mac`. **When debugging on macOS, start/stop the gateway via the app or gateway CLI, not ad-hoc tmux sessions; kill any temporary tunnels before handoff.**
 - macOS logs: use `./scripts/clawlog.sh` to query unified logs for the OpenClaw subsystem; it supports follow/tail/category filters and expects passwordless sudo for `/usr/bin/log`.
 - If shared guardrails are available locally, review them; otherwise follow this repo's guidance.
 - SwiftUI state management (iOS/macOS): prefer the `Observation` framework (`@Observable`, `@Bindable`) over `ObservableObject`/`@StateObject`; don’t introduce new `ObservableObject` unless required for compatibility, and migrate existing usages when touching related code.
 - Connection providers: when adding a new connection, update every UI surface and docs (macOS app, web UI, mobile if applicable, onboarding/overview docs) and add matching status + configuration forms so provider lists and settings stay in sync.
-- Version locations: `package.json` (CLI), `apps/android/app/build.gradle.kts` (versionName/versionCode), `apps/ios/Sources/Info.plist` + `apps/ios/Tests/Info.plist` (CFBundleShortVersionString/CFBundleVersion), `apps/macos/Sources/OpenClaw/Resources/Info.plist` (CFBundleShortVersionString/CFBundleVersion), `docs/install/updating.md` (pinned npm version), and Peekaboo Xcode projects/Info.plists (MARKETING_VERSION/CURRENT_PROJECT_VERSION).
-- "Bump version everywhere" means all version locations above **except** `appcast.xml` (only touch appcast when cutting a new macOS Sparkle release).
+- Version locations: `package.json` (CLI), `apps/android/app/build.gradle.kts` (versionName/versionCode), `apps/ios/version.json` (source for generated iOS config and Fastlane metadata), `apps/macos/Sources/OpenClaw/Resources/Info.plist` (CFBundleShortVersionString/CFBundleVersion), and `docs/install/updating.md` (pinned npm version).
+- "Bump version everywhere" means all version locations above, then run `pnpm ios:version:sync` for iOS generated outputs. Only touch appcast metadata when cutting a new macOS Sparkle release.
 - **Restart apps:** “restart iOS/Android apps” means rebuild (recompile/install) and relaunch, not just kill/launch.
 - **Device checks:** before testing, verify connected real devices (iOS/Android) before reaching for simulators/emulators.
 - iOS Team ID lookup: `security find-identity -p codesigning -v` → use Apple Development (…) TEAMID. Fallback: `defaults read com.apple.dt.Xcode IDEProvisioningTeamIdentifiers`.
@@ -397,7 +439,7 @@
 - Lobster seam: use the shared CLI palette in `src/terminal/palette.ts` (no hardcoded colors); apply palette to onboarding/config prompts and other TTY UI output as needed.
 - **Multi-agent safety:** focus reports on your edits; avoid guard-rail disclaimers unless truly blocked; when multiple agents touch the same file, continue if safe; end with a brief “other files present” note only if relevant.
 - Bug investigations: read source code of relevant npm dependencies and all related local code before concluding; aim for high-confidence root cause.
-- Code style: add brief comments for tricky logic; keep files under ~500 LOC when feasible (split/refactor as needed).
+- Code style: add brief comments for tricky logic; keep files under ~700 LOC when feasible (split/refactor as needed).
 - Tool schema guardrails (google-antigravity): avoid `Type.Union` in tool input schemas; no `anyOf`/`oneOf`/`allOf`. Use `stringEnum`/`optionalStringEnum` (Type.Unsafe enum) for string lists, and `Type.Optional(...)` instead of `... | null`. Keep top-level tool schema as `type: "object"` with `properties`.
 - Tool schema guardrails: avoid raw `format` property names in tool schemas; some validators treat `format` as a reserved keyword and reject the schema.
 - When asked to open a “session” file, open the Pi session logs under `~/.openclaw/agents/<agentId>/sessions/*.jsonl` (use the `agent=<id>` value in the Runtime line of the system prompt; newest unless a specific ID is given), not the default `sessions.json`. If logs are needed from another machine, SSH via Tailscale and read the same path there.

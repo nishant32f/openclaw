@@ -14,9 +14,9 @@
     "defaults": {
       "workspace": "/data/workspace",
       "model": {
-        "primary": "openrouter/deepseek/deepseek-chat",
+        "primary": "openrouter/google/gemma-4-31b-it:free",
         "fallbacks": [
-          "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+          "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
         ]
       }
     }

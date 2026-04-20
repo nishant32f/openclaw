@@ -138,7 +138,17 @@ fi
 # ─── Wait for gateway to boot ───────────────────────────────────────
 
 step "Waiting for gateway to boot..."
-sleep 25
+# Poll readiness instead of fixed sleep. Fresh deploys take longer than 25s.
+READY=0
+for i in $(seq 1 40); do
+  if fly ssh console -a "$APP" -C "sh -c 'openclaw cron list --url $GW_URL --token \$OPENCLAW_GATEWAY_TOKEN >/dev/null 2>&1'" >/dev/null 2>&1; then
+    info "Gateway ready after ${i}x3s"
+    READY=1
+    break
+  fi
+  sleep 3
+done
+[ "$READY" = "1" ] || warn "Gateway not ready after 120s; continuing anyway."
 
 # ─── Setup bird auth (after restart so secrets are live) ─────────────
 
@@ -167,10 +177,10 @@ for name in digest-morning digest-evening; do
     openclaw cron rm "\$ID" \$GW 2>/dev/null && echo "Removed old \$name"
   fi
 done
-openclaw cron add \$GW --cron "30 3 * * *" --tz Asia/Kolkata --name digest-morning --timeout-seconds 180 --no-deliver --model "$DIGEST_MODEL" --message "$MORNING_MSG" 2>/dev/null || echo "Morning cron failed"
-openclaw cron add \$GW --cron "30 15 * * *" --tz Asia/Kolkata --name digest-evening --timeout-seconds 180 --no-deliver --model "$DIGEST_MODEL" --message "$EVENING_MSG" 2>/dev/null || echo "Evening cron failed"
+openclaw cron add \$GW --cron "30 3 * * *" --tz Asia/Kolkata --name digest-morning --timeout-seconds 180 --no-deliver --model "$DIGEST_MODEL" --message "$MORNING_MSG" >/dev/null && echo "Added digest-morning" || echo "Morning cron failed"
+openclaw cron add \$GW --cron "30 15 * * *" --tz Asia/Kolkata --name digest-evening --timeout-seconds 180 --no-deliver --model "$DIGEST_MODEL" --message "$EVENING_MSG" >/dev/null && echo "Added digest-evening" || echo "Evening cron failed"
 echo "---CRON LIST---"
-openclaw cron list \$GW 2>/dev/null || echo "Could not list cron jobs"
+openclaw cron list \$GW || echo "Could not list cron jobs"
 CRONSCRIPT
 
 fly ssh console -a "$APP" -C "sh -c 'cat > /tmp/cron-setup.sh && chmod +x /tmp/cron-setup.sh && /tmp/cron-setup.sh && rm -f /tmp/cron-setup.sh'" < "$CRON_SETUP" 2>&1 || warn "Cron setup failed — gateway may still be booting."

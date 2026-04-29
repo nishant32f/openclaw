@@ -1,7 +1,9 @@
+import { stripInboundMetadata } from "../../auto-reply/reply/strip-inbound-meta.js";
 import {
   extractLeadingHttpStatus,
   formatRawAssistantErrorForUi,
   isCloudflareOrHtmlErrorPage,
+  MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE,
   parseApiErrorInfo,
   parseApiErrorPayload,
 } from "../../shared/assistant-error-format.js";
@@ -34,6 +36,8 @@ export function formatBillingErrorMessage(provider?: string, model?: string): st
 export const BILLING_ERROR_USER_MESSAGE = formatBillingErrorMessage();
 
 const RATE_LIMIT_ERROR_USER_MESSAGE = "⚠️ API rate limit reached. Please try again later.";
+const MODEL_CAPACITY_ERROR_USER_MESSAGE =
+  "⚠️ Selected model is at capacity. Try a different model, or wait and retry.";
 const OVERLOADED_ERROR_USER_MESSAGE =
   "The AI service is temporarily overloaded. Please try again in a moment.";
 const FINAL_TAG_RE = /<\s*\/?\s*final\s*>/gi;
@@ -60,6 +64,7 @@ const HTTP_ERROR_HINTS = [
 ];
 const RATE_LIMIT_SPECIFIC_HINT_RE =
   /\bmin(ute)?s?\b|\bhours?\b|\bseconds?\b|\btry again in\b|\breset\b|\bplan\b|\bquota\b/i;
+const MODEL_CAPACITY_ERROR_RE = /\b(?:selected\s+)?model\s+(?:is\s+)?at capacity\b/i;
 const NON_ERROR_PROVIDER_PAYLOAD_MAX_LENGTH = 16_384;
 const NON_ERROR_PROVIDER_PAYLOAD_PREFIX_RE = /^codex\s*error(?:\s+\d{3})?[:\s-]+/i;
 
@@ -92,6 +97,9 @@ function extractProviderRateLimitMessage(raw: string): string | undefined {
 export function formatRateLimitOrOverloadedErrorCopy(raw: string): string | undefined {
   if (isRateLimitErrorMessage(raw)) {
     return extractProviderRateLimitMessage(raw) ?? RATE_LIMIT_ERROR_USER_MESSAGE;
+  }
+  if (MODEL_CAPACITY_ERROR_RE.test(raw)) {
+    return MODEL_CAPACITY_ERROR_USER_MESSAGE;
   }
   if (isOverloadedErrorMessage(raw)) {
     return OVERLOADED_ERROR_USER_MESSAGE;
@@ -152,6 +160,10 @@ export function formatTransportErrorCopy(raw: string): string | undefined {
     return "LLM request failed: network connection error.";
   }
 
+  if (raw.includes("网络错误") || raw.includes("网络异常") || raw.includes("连接错误")) {
+    return "LLM request failed: provider reported a network error.";
+  }
+
   return undefined;
 }
 
@@ -196,6 +208,17 @@ export function isInvalidStreamingEventOrderError(raw: string): boolean {
     lower.includes("message_start") &&
     lower.includes("message_stop")
   );
+}
+
+export function isStreamingJsonParseError(raw: string): boolean {
+  if (!raw) {
+    return false;
+  }
+  const trimmed = raw.trim();
+  if (trimmed === MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE) {
+    return true;
+  }
+  return false;
 }
 
 function hasRateLimitTpmHint(raw: string): boolean {
@@ -359,7 +382,7 @@ export function sanitizeUserFacingText(text: unknown, opts?: { errorContext?: bo
     return raw;
   }
   const errorContext = opts?.errorContext ?? false;
-  const stripped = stripInternalRuntimeContext(stripFinalTagsFromText(raw));
+  const stripped = stripInboundMetadata(stripInternalRuntimeContext(stripFinalTagsFromText(raw)));
   const trimmed = stripped.trim();
   if (!trimmed) {
     return "";
@@ -406,6 +429,10 @@ export function sanitizeUserFacingText(text: unknown, opts?: { errorContext?: bo
 
     if (isRawApiErrorPayload(trimmed) || isLikelyHttpErrorText(trimmed)) {
       return formatRawAssistantErrorForUi(trimmed);
+    }
+
+    if (isStreamingJsonParseError(trimmed)) {
+      return "LLM streaming response contained a malformed fragment. Please try again.";
     }
 
     if (ERROR_PREFIX_RE.test(trimmed)) {

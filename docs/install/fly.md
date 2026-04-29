@@ -1,7 +1,6 @@
 ---
-title: Fly.io
-description: Deploy OpenClaw on Fly.io
 summary: "Step-by-step Fly.io deployment for OpenClaw with persistent storage and HTTPS"
+title: Fly.io
 read_when:
   - Deploying OpenClaw on Fly.io
   - Setting up Fly volumes, secrets, and first-run config
@@ -25,266 +24,243 @@ read_when:
 3. Deploy with `fly deploy`
 4. SSH in to create config or use Control UI
 
-## 1) Create the Fly app
+<Steps>
+  <Step title="Create the Fly app">
+    ```bash
+    # Clone the repo
+    git clone https://github.com/openclaw/openclaw.git
+    cd openclaw
 
-```bash
-# Clone the repo
-git clone https://github.com/openclaw/openclaw.git
-cd openclaw
+    # Create a new Fly app (pick your own name)
+    fly apps create my-openclaw
 
-# Create a new Fly app (pick your own name)
-fly apps create my-openclaw
+    # Create a persistent volume (1GB is usually enough)
+    fly volumes create openclaw_data --size 1 --region iad
+    ```
 
-# Create a persistent volume (1GB is usually enough)
-fly volumes create openclaw_data --size 1 --region iad
-```
+    **Tip:** Choose a region close to you. Common options: `lhr` (London), `iad` (Virginia), `sjc` (San Jose).
 
-**Tip:** Choose a region close to you. Common options: `lhr` (London), `iad` (Virginia), `sjc` (San Jose).
+  </Step>
 
-## 2) Configure fly.toml
+  <Step title="Configure fly.toml">
+    Edit `fly.toml` to match your app name and requirements.
 
-Edit `fly.toml` to match your app name and requirements.
+    **Security note:** The default config exposes a public URL. For a hardened deployment with no public IP, see [Private Deployment](#private-deployment-hardened) or use `fly.private.toml`.
 
-**Security note:** The default config exposes a public URL. For a hardened deployment with no public IP, see [Private Deployment](#private-deployment-hardened) or use `fly.private.toml`.
+    ```toml
+    app = "my-openclaw"  # Your app name
+    primary_region = "iad"
 
-```toml
-app = "my-openclaw"  # Your app name
-primary_region = "iad"
+    [build]
+      dockerfile = "Dockerfile"
 
-[build]
-  dockerfile = "Dockerfile"
+    [env]
+      NODE_ENV = "production"
+      OPENCLAW_PREFER_PNPM = "1"
+      OPENCLAW_STATE_DIR = "/data"
+      NODE_OPTIONS = "--max-old-space-size=1536"
 
-[env]
-  NODE_ENV = "production"
-  OPENCLAW_PREFER_PNPM = "1"
-  OPENCLAW_STATE_DIR = "/data"
-  NODE_OPTIONS = "--max-old-space-size=1536"
+    [processes]
+      app = "node dist/index.js gateway --allow-unconfigured --port 3000 --bind lan"
 
-[processes]
-  app = "node dist/index.js gateway --allow-unconfigured --port 3000 --bind lan"
+    [http_service]
+      internal_port = 3000
+      force_https = true
+      auto_stop_machines = false
+      auto_start_machines = true
+      min_machines_running = 1
+      processes = ["app"]
 
-[http_service]
-  internal_port = 3000
-  force_https = true
-  auto_stop_machines = false
-  auto_start_machines = true
-  min_machines_running = 1
-  processes = ["app"]
+    [[vm]]
+      size = "shared-cpu-2x"
+      memory = "2048mb"
 
-[[vm]]
-  size = "shared-cpu-4x"
-  memory = "4096mb"
+    [mounts]
+      source = "openclaw_data"
+      destination = "/data"
+    ```
 
-[mounts]
-  source = "openclaw_data"
-  destination = "/data"
-```
+    **Key settings:**
 
-**Key settings:**
+    | Setting                        | Why                                                                         |
+    | ------------------------------ | --------------------------------------------------------------------------- |
+    | `--bind lan`                   | Binds to `0.0.0.0` so Fly's proxy can reach the gateway                     |
+    | `--allow-unconfigured`         | Starts without a config file (you'll create one after)                      |
+    | `internal_port = 3000`         | Must match `--port 3000` (or `OPENCLAW_GATEWAY_PORT`) for Fly health checks |
+    | `memory = "2048mb"`            | 512MB is too small; 2GB recommended                                         |
+    | `OPENCLAW_STATE_DIR = "/data"` | Persists state on the volume                                                |
 
-| Setting                        | Why                                                                         |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| `--bind lan`                   | Binds to `0.0.0.0` so Fly's proxy can reach the gateway                     |
-| `--allow-unconfigured`         | Starts without a config file (you'll create one after)                      |
-| `internal_port = 3000`         | Must match `--port 3000` (or `OPENCLAW_GATEWAY_PORT`) for Fly health checks |
-| `memory = "4096mb"`            | 512MB is too small; 4GB recommended for reliable cold starts                |
-| `OPENCLAW_STATE_DIR = "/data"` | Persists state on the volume                                                |
+  </Step>
 
-## 3) Set secrets
+  <Step title="Set secrets">
+    ```bash
+    # Required: Gateway token (for non-loopback binding)
+    fly secrets set OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 32)
 
-```bash
-# Required: Gateway token (for non-loopback binding)
-fly secrets set OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 32)
+    # Model provider API keys
+    fly secrets set ANTHROPIC_API_KEY=sk-ant-...
 
-# Model provider API keys
-fly secrets set ANTHROPIC_API_KEY=sk-ant-...
+    # Optional: Other providers
+    fly secrets set OPENAI_API_KEY=sk-...
+    fly secrets set GOOGLE_API_KEY=...
 
-# Optional: Other providers
-fly secrets set OPENAI_API_KEY=sk-...
-fly secrets set GOOGLE_API_KEY=...
+    # Channel tokens
+    fly secrets set DISCORD_BOT_TOKEN=MTQ...
+    ```
 
-# Channel tokens
-fly secrets set DISCORD_BOT_TOKEN=MTQ...
-```
+    **Notes:**
 
-**Notes:**
+    - Non-loopback binds (`--bind lan`) require a valid gateway auth path. This Fly.io example uses `OPENCLAW_GATEWAY_TOKEN`, but `gateway.auth.password` or a correctly configured non-loopback `trusted-proxy` deployment also satisfy the requirement.
+    - Treat these tokens like passwords.
+    - **Prefer env vars over config file** for all API keys and tokens. This keeps secrets out of `openclaw.json` where they could be accidentally exposed or logged.
 
-- Non-loopback binds (`--bind lan`) require `OPENCLAW_GATEWAY_TOKEN` for security.
-- Treat these tokens like passwords.
-- **Prefer env vars over config file** for all API keys and tokens. This keeps secrets out of `openclaw.json` where they could be accidentally exposed or logged.
+  </Step>
 
-## 4) Deploy
+  <Step title="Deploy">
+    ```bash
+    fly deploy
+    ```
 
-```bash
-fly deploy
-```
+    First deploy builds the Docker image (~2-3 minutes). Subsequent deploys are faster.
 
-First deploy builds the Docker image (~2-3 minutes). Subsequent deploys are faster.
+    After deployment, verify:
 
-After deployment, verify:
+    ```bash
+    fly status
+    fly logs
+    ```
 
-```bash
-fly status
-fly logs
-```
+    You should see:
 
-You should see:
+    ```
+    [gateway] listening on ws://0.0.0.0:3000 (PID xxx)
+    [discord] logged in to discord as xxx
+    ```
 
-```
-[gateway] listening on ws://0.0.0.0:3000 (PID xxx)
-```
+  </Step>
 
-## 5) Create config file
+  <Step title="Create config file">
+    SSH into the machine to create a proper config:
 
-The gateway requires a config file with `gateway.controlUi.allowedOrigins` when binding to non-loopback (`--bind lan`). Without it, the gateway will refuse to start.
+    ```bash
+    fly ssh console
+    ```
 
-SSH into the machine and create a minimal config:
+    Create the config directory and file:
 
-```bash
-echo '{"gateway":{"mode":"local","controlUi":{"allowedOrigins":["https://my-openclaw.fly.dev"]}}}' \
-  | fly ssh console -C "tee /data/openclaw.json"
-```
-
-Replace `my-openclaw` with your actual Fly app name.
-
-Then restart:
-
-```bash
-fly machines list                    # find your machine ID
-fly machine restart <machine-id>
-```
-
-Verify the gateway starts:
-
-```bash
-fly logs
-```
-
-You should see `[gateway] listening on ws://0.0.0.0:3000`.
-
-### Full config example
-
-For a more complete setup with agents and channels, SSH in and write a full config:
-
-```bash
-fly ssh console
-```
-
-```bash
-cat > /data/openclaw.json << 'EOF'
-{
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "anthropic/claude-opus-4-6",
-        "fallbacks": ["anthropic/claude-sonnet-4-6", "openai/gpt-4o"]
-      },
-      "maxConcurrent": 4
-    },
-    "list": [
-      {
-        "id": "main",
-        "default": true
-      }
-    ]
-  },
-  "auth": {
-    "profiles": {
-      "anthropic:default": { "mode": "token", "provider": "anthropic" },
-      "openai:default": { "mode": "token", "provider": "openai" }
-    }
-  },
-  "bindings": [
+    ```bash
+    mkdir -p /data
+    cat > /data/openclaw.json << 'EOF'
     {
-      "agentId": "main",
-      "match": { "channel": "discord" }
-    }
-  ],
-  "channels": {
-    "discord": {
-      "enabled": true,
-      "groupPolicy": "allowlist",
-      "guilds": {
-        "YOUR_GUILD_ID": {
-          "channels": { "general": { "allow": true } },
-          "requireMention": false
+      "agents": {
+        "defaults": {
+          "model": {
+            "primary": "anthropic/claude-opus-4-6",
+            "fallbacks": ["anthropic/claude-sonnet-4-6", "openai/gpt-5.4"]
+          },
+          "maxConcurrent": 4
+        },
+        "list": [
+          {
+            "id": "main",
+            "default": true
+          }
+        ]
+      },
+      "auth": {
+        "profiles": {
+          "anthropic:default": { "mode": "token", "provider": "anthropic" },
+          "openai:default": { "mode": "token", "provider": "openai" }
         }
-      }
+      },
+      "bindings": [
+        {
+          "agentId": "main",
+          "match": { "channel": "discord" }
+        }
+      ],
+      "channels": {
+        "discord": {
+          "enabled": true,
+          "groupPolicy": "allowlist",
+          "guilds": {
+            "YOUR_GUILD_ID": {
+              "channels": { "general": { "allow": true } },
+              "requireMention": false
+            }
+          }
+        }
+      },
+      "gateway": {
+        "mode": "local",
+        "bind": "auto",
+        "controlUi": {
+          "allowedOrigins": [
+            "https://my-openclaw.fly.dev",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
+          ]
+        }
+      },
+      "meta": {}
     }
-  },
-  "gateway": {
-    "mode": "local",
-    "controlUi": {
-      "allowedOrigins": ["https://my-openclaw.fly.dev"]
-    }
-  },
-  "meta": {
-    "lastTouchedVersion": "2026.1.29"
-  }
-}
-EOF
-```
+    EOF
+    ```
 
-**Important:** Replace `my-openclaw` in `allowedOrigins` with your actual Fly app name.
+    **Note:** With `OPENCLAW_STATE_DIR=/data`, the config path is `/data/openclaw.json`.
 
-**Note:** With `OPENCLAW_STATE_DIR=/data`, the config path is `/data/openclaw.json`.
+    **Note:** Replace `https://my-openclaw.fly.dev` with your real Fly app
+    origin. Gateway startup seeds local Control UI origins from the runtime
+    `--bind` and `--port` values so first boot can proceed before config exists,
+    but browser access through Fly still needs the exact HTTPS origin listed in
+    `gateway.controlUi.allowedOrigins`.
 
-**Note:** The Discord token can come from either:
+    **Note:** The Discord token can come from either:
 
-- Environment variable: `DISCORD_BOT_TOKEN` (recommended for secrets)
-- Config file: `channels.discord.token`
+    - Environment variable: `DISCORD_BOT_TOKEN` (recommended for secrets)
+    - Config file: `channels.discord.token`
 
-If using env var, no need to add token to config. The gateway reads `DISCORD_BOT_TOKEN` automatically.
+    If using env var, no need to add token to config. The gateway reads `DISCORD_BOT_TOKEN` automatically.
 
-Restart to apply:
+    Restart to apply:
 
-```bash
-exit
-fly machine restart <machine-id>
-```
+    ```bash
+    exit
+    fly machine restart <machine-id>
+    ```
 
-## 6) Access the Gateway
+  </Step>
 
-### Control UI
+  <Step title="Access the Gateway">
+    ### Control UI
 
-Open in browser:
+    Open in browser:
 
-```bash
-fly open
-```
+    ```bash
+    fly open
+    ```
 
-Or visit `https://my-openclaw.fly.dev/`
+    Or visit `https://my-openclaw.fly.dev/`
 
-**Step 1: Enter the gateway token**
+    Authenticate with the configured shared secret. This guide uses the gateway
+    token from `OPENCLAW_GATEWAY_TOKEN`; if you switched to password auth, use
+    that password instead.
 
-Click **Overview** in the left sidebar. Paste your `OPENCLAW_GATEWAY_TOKEN` value into the **Gateway Token** field and click **Connect**.
+    ### Logs
 
-**Step 2: Approve device pairing**
+    ```bash
+    fly logs              # Live logs
+    fly logs --no-tail    # Recent logs
+    ```
 
-On first connection from a new browser, the Control UI will show a "pairing required" message. Approve the device via SSH:
+    ### SSH Console
 
-```bash
-# List pending pairing requests
-fly ssh console -C "sh -c 'OPENCLAW_GATEWAY_PORT=3000 node /app/openclaw.mjs devices list'"
+    ```bash
+    fly ssh console
+    ```
 
-# Approve the pending request (copy the Request ID from the output)
-fly ssh console -C "sh -c 'OPENCLAW_GATEWAY_PORT=3000 node /app/openclaw.mjs devices approve <request-id>'"
-```
-
-The browser will reconnect automatically after approval. You only need to do this once per browser/device.
-
-### Logs
-
-```bash
-fly logs              # Live logs
-fly logs --no-tail    # Recent logs
-```
-
-### SSH Console
-
-```bash
-fly ssh console
-```
+  </Step>
+</Steps>
 
 ## Troubleshooting
 
@@ -293,12 +269,6 @@ fly ssh console
 The gateway is binding to `127.0.0.1` instead of `0.0.0.0`.
 
 **Fix:** Add `--bind lan` to your process command in `fly.toml`.
-
-### "non-loopback Control UI requires gateway.controlUi.allowedOrigins"
-
-The gateway crashes on startup because `--bind lan` requires a config file with `gateway.controlUi.allowedOrigins`.
-
-**Fix:** Create a config file with your app's origin before starting the gateway. See [Step 5](#5-create-config-file).
 
 ### Health checks failing / connection refused
 
@@ -314,33 +284,18 @@ Container keeps restarting or getting killed. Signs: `SIGABRT`, `v8::internal::R
 
 ```toml
 [[vm]]
-  size = "shared-cpu-4x"
-  memory = "4096mb"
+  memory = "2048mb"
 ```
 
 Or update an existing machine:
 
 ```bash
-fly machine update <machine-id> --vm-memory 4096 --vm-size shared-cpu-4x -y
+fly machine update <machine-id> --vm-memory 2048 -y
 ```
 
-**Note:** 512MB is too small. 2GB may work for warm restarts but cold starts can hang on `shared-cpu-2x` due to module initialization. **`shared-cpu-4x` with 4GB is recommended.**
+**Note:** 512MB is too small. 1GB may work but can OOM under load or with verbose logging. **2GB is recommended.**
 
-### Gateway process running but never listens (cold start hang)
-
-The gateway process is alive (`ps aux` shows `openclaw-gateway`) but never binds to port 3000. Fly proxy reports "instance refused connection".
-
-This happens on `shared-cpu-2x` (2 vCPUs) because module initialization is too slow. The gateway can take 5+ minutes to start on a small VM, exceeding Fly's patience.
-
-**Fix:** Upgrade to `shared-cpu-4x`:
-
-```bash
-fly machine update <machine-id> --vm-memory 4096 --vm-size shared-cpu-4x -y
-```
-
-After upgrade, cold starts complete in ~50 seconds.
-
-### Gateway Lock Issues
+### Gateway lock issues
 
 Gateway refuses to start with "already running" errors.
 
@@ -355,7 +310,7 @@ fly machine restart <machine-id>
 
 The lock file is at `/data/gateway.*.lock` (not in a subdirectory).
 
-### Config Not Being Read
+### Config not being read
 
 `--allow-unconfigured` only bypasses the startup guard. It does not create or repair `/data/openclaw.json`, so make sure your real config exists and includes `gateway.mode="local"` when you want a normal local gateway start.
 
@@ -365,7 +320,7 @@ Verify the config exists:
 fly ssh console --command "cat /data/openclaw.json"
 ```
 
-### Writing Config via SSH
+### Writing config via SSH
 
 The `fly ssh console -C` command doesn't support shell redirection. To write a config file:
 
@@ -384,9 +339,10 @@ fly sftp shell
 fly ssh console --command "rm /data/openclaw.json"
 ```
 
-### State Not Persisting
+### State not persisting
 
-If you lose credentials or sessions after a restart, the state dir is writing to the container filesystem.
+If you lose auth profiles, channel/provider state, or sessions after a restart,
+the state dir is writing to the container filesystem.
 
 **Fix:** Ensure `OPENCLAW_STATE_DIR=/data` is set in `fly.toml` and redeploy.
 
@@ -404,7 +360,7 @@ fly status
 fly logs
 ```
 
-### Updating Machine Command
+### Updating machine command
 
 If you need to change the startup command without a full redeploy:
 
@@ -416,12 +372,12 @@ fly machines list
 fly machine update <machine-id> --command "node dist/index.js gateway --port 3000 --bind lan" -y
 
 # Or with memory increase
-fly machine update <machine-id> --vm-memory 4096 --vm-size shared-cpu-4x --command "node dist/index.js gateway --port 3000 --bind lan" -y
+fly machine update <machine-id> --vm-memory 2048 --command "node dist/index.js gateway --port 3000 --bind lan" -y
 ```
 
 **Note:** After `fly deploy`, the machine command may reset to what's in `fly.toml`. If you made manual changes, re-apply them after deploy.
 
-## Private Deployment (Hardened)
+## Private deployment (hardened)
 
 By default, Fly allocates public IPs, making your gateway accessible at `https://your-app.fly.dev`. This is convenient but means your deployment is discoverable by internet scanners (Shodan, Censys, etc.).
 
@@ -507,22 +463,22 @@ If you need webhook callbacks (Twilio, Telnyx, etc.) without public exposure:
 
 Example voice-call config with ngrok:
 
-```json
+```json5
 {
-  "plugins": {
-    "entries": {
+  plugins: {
+    entries: {
       "voice-call": {
-        "enabled": true,
-        "config": {
-          "provider": "twilio",
-          "tunnel": { "provider": "ngrok" },
-          "webhookSecurity": {
-            "allowedHosts": ["example.ngrok.app"]
-          }
-        }
-      }
-    }
-  }
+        enabled: true,
+        config: {
+          provider: "twilio",
+          tunnel: { provider: "ngrok" },
+          webhookSecurity: {
+            allowedHosts: ["example.ngrok.app"],
+          },
+        },
+      },
+    },
+  },
 }
 ```
 
@@ -547,10 +503,22 @@ The ngrok tunnel runs inside the container and provides a public webhook URL wit
 
 ## Cost
 
-With the recommended config (`shared-cpu-4x`, 4GB RAM):
+With the recommended config (`shared-cpu-2x`, 2GB RAM):
 
-- ~$25-30/month depending on usage
+- ~$10-15/month depending on usage
 - Free tier includes some allowance
-- `shared-cpu-2x` (2GB) is cheaper (~$10-15/month) but cold starts may hang due to slow module initialization
 
 See [Fly.io pricing](https://fly.io/docs/about/pricing/) for details.
+
+## Next steps
+
+- Set up messaging channels: [Channels](/channels)
+- Configure the Gateway: [Gateway configuration](/gateway/configuration)
+- Keep OpenClaw up to date: [Updating](/install/updating)
+
+## Related
+
+- [Install overview](/install)
+- [Hetzner](/install/hetzner)
+- [Docker](/install/docker)
+- [VPS hosting](/vps)

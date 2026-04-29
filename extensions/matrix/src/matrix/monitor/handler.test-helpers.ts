@@ -35,6 +35,7 @@ type MatrixHandlerTestHarnessOptions = {
   dmThreadReplies?: "off" | "inbound" | "always";
   dmSessionScope?: "per-user" | "per-room";
   streaming?: MatrixStreamingMode;
+  previewToolProgressEnabled?: boolean;
   blockStreamingEnabled?: boolean;
   dmEnabled?: boolean;
   dmPolicy?: "pairing" | "allowlist" | "open" | "disabled";
@@ -85,6 +86,7 @@ type MatrixHandlerTestHarnessOptions = {
   enqueueSystemEvent?: (...args: unknown[]) => void;
   getRoomInfo?: MatrixMonitorHandlerParams["getRoomInfo"];
   getMemberDisplayName?: MatrixMonitorHandlerParams["getMemberDisplayName"];
+  resolveLiveUserAllowlist?: MatrixMonitorHandlerParams["resolveLiveUserAllowlist"];
 };
 
 type MatrixHandlerTestHarness = {
@@ -117,7 +119,19 @@ export function createMatrixHandlerTestHarness(
       counts: { final: 0, block: 0, tool: 0 },
     }));
   const enqueueSystemEvent = options.enqueueSystemEvent ?? vi.fn();
-  const cfgForHandler = options.cfg ?? {};
+  const dmPolicy = options.dmPolicy ?? "open";
+  const allowFrom = options.allowFrom ?? (dmPolicy === "open" ? ["*"] : []);
+  const cfgForHandler =
+    options.cfg ??
+    ({
+      channels: {
+        matrix: {
+          dm: {
+            allowFrom,
+          },
+        },
+      },
+    } as const);
 
   const handler = createMatrixRoomMessageHandler({
     client: {
@@ -127,7 +141,7 @@ export function createMatrixHandlerTestHarness(
     } as never,
     core: {
       config: {
-        loadConfig: () => cfgForHandler,
+        current: () => cfgForHandler,
       },
       channel: {
         pairing: {
@@ -214,7 +228,7 @@ export function createMatrixHandlerTestHarness(
         error: () => {},
       } as RuntimeLogger),
     logVerboseMessage: options.logVerboseMessage ?? (() => {}),
-    allowFrom: options.allowFrom ?? [],
+    allowFrom,
     allowFromResolvedEntries: options.allowFromResolvedEntries,
     groupAllowFrom: options.groupAllowFrom ?? [],
     groupAllowFromResolvedEntries: options.groupAllowFromResolvedEntries,
@@ -227,9 +241,10 @@ export function createMatrixHandlerTestHarness(
     dmThreadReplies: options.dmThreadReplies,
     dmSessionScope: options.dmSessionScope,
     streaming: options.streaming ?? "off",
+    previewToolProgressEnabled: options.previewToolProgressEnabled ?? false,
     blockStreamingEnabled: options.blockStreamingEnabled ?? false,
     dmEnabled: options.dmEnabled ?? true,
-    dmPolicy: options.dmPolicy ?? "open",
+    dmPolicy,
     textLimit: options.textLimit ?? 8_000,
     mediaMaxBytes: options.mediaMaxBytes ?? 10_000_000,
     startupMs: options.startupMs ?? 0,
@@ -242,6 +257,7 @@ export function createMatrixHandlerTestHarness(
     getRoomInfo: options.getRoomInfo ?? (async () => ({ altAliases: [] })),
     getMemberDisplayName: options.getMemberDisplayName ?? (async () => "sender"),
     needsRoomAliasesForConfig: options.needsRoomAliasesForConfig ?? false,
+    resolveLiveUserAllowlist: options.resolveLiveUserAllowlist,
     historyLimit: options.historyLimit ?? 0,
   });
 
